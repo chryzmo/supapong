@@ -1,39 +1,65 @@
 import { currentUserId, ensureSignedIn, fetchPlayer, savePlayer, signOut } from './auth';
-import { DISPLAY_NAME_MAX, validateDisplayName, type Player } from './types';
+import { fetchRoom, fetchSeatedRoom } from './lobby/api';
+import { lobbyScreen } from './lobby/lobby';
+import { waitingScreen } from './room/waiting';
+import { DISPLAY_NAME_MAX, validateDisplayName, type Player, type SeatedRoom } from './types';
+import { errorMessage, h, type View } from './ui';
 
-type Screen = { name: 'loading' } | { name: 'pick-name'; current?: Player } | { name: 'lobby'; player: Player };
+type Screen =
+  | { name: 'loading' }
+  | { name: 'pick-name'; current?: Player }
+  | { name: 'lobby'; player: Player }
+  | { name: 'room'; player: Player; room: SeatedRoom };
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Missing #app element.');
 const root: HTMLElement = app;
 
-/** Small element helper.  Text always goes through textContent, never innerHTML. */
-function h<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  props: Partial<HTMLElementTagNameMap[K]> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = Object.assign(document.createElement(tag), props);
-  node.append(...children);
-  return node;
-}
+let current: View | undefined;
 
 function show(screen: Screen): void {
-  root.replaceChildren(render(screen));
+  current?.dispose?.();
+  current = render(screen);
+  root.replaceChildren(current.el);
 }
 
-function render(screen: Screen): HTMLElement {
+function showError(err: unknown): void {
+  console.error(err);
+  current?.dispose?.();
+  current = undefined;
+  root.replaceChildren(h('div', { className: 'panel' }, h('p', { className: 'error' }, errorMessage(err))));
+}
+
+function render(screen: Screen): View {
   switch (screen.name) {
     case 'loading':
-      return h('div', { className: 'panel' }, h('p', {}, 'Loading…'));
+      return { el: h('div', { className: 'panel' }, h('p', {}, 'Loading…')) };
     case 'pick-name':
       return pickNameScreen(screen.current);
-    case 'lobby':
-      return lobbyScreen(screen.player);
+    case 'lobby': {
+      const { player } = screen;
+      return lobbyScreen(player, {
+        enterRoom(roomId, seat) {
+          fetchRoom(roomId, seat)
+            .then((room) => show({ name: 'room', player, room }))
+            .catch(showError);
+        },
+        rename: () => show({ name: 'pick-name', current: player }),
+        signOut() {
+          signOut()
+            .then(() => show({ name: 'pick-name' }))
+            .catch(showError);
+        },
+      });
+    }
+    case 'room': {
+      const { player, room } = screen;
+      return waitingScreen(player, room, { left: () => show({ name: 'lobby', player }) });
+    }
   }
 }
 
-function pickNameScreen(current?: Player): HTMLElement {
+function pickNameScreen(current?: Player): View {
   const input = h('input', {
     name: 'display_name',
     maxLength: DISPLAY_NAME_MAX,
@@ -61,50 +87,34 @@ function pickNameScreen(current?: Player): HTMLElement {
       const player = await savePlayer(userId, result.value);
       show({ name: 'lobby', player });
     } catch (err) {
-      error.textContent = err instanceof Error ? err.message : 'Something went wrong.';
+      error.textContent = errorMessage(err);
       submit.disabled = false;
     }
   });
 
   queueMicrotask(() => input.focus());
-  return h(
-    'div',
-    { className: 'panel' },
-    h('h1', {}, 'Arena Pong'),
-    h('p', {}, current ? 'Change your display name.' : 'Pick a name to get started. No account needed.'),
-    form,
-  );
-}
-
-function lobbyScreen(player: Player): HTMLElement {
-  const rename = h('button', { className: 'secondary', type: 'button' }, 'Change name');
-  rename.addEventListener('click', () => show({ name: 'pick-name', current: player }));
-
-  const leave = h('button', { className: 'secondary', type: 'button' }, 'Sign out');
-  leave.addEventListener('click', async () => {
-    await signOut();
-    show({ name: 'pick-name' });
-  });
-
-  return h(
-    'div',
-    { className: 'panel' },
-    h('h1', {}, `Hi, ${player.displayName}`),
-    h('p', {}, 'The lobby arrives in milestone 2.'),
-    h('div', { className: 'row' }, rename, leave),
-  );
+  return {
+    el: h(
+      'div',
+      { className: 'panel' },
+      h('h1', {}, 'Arena Pong'),
+      h('p', {}, current ? 'Change your display name.' : 'Pick a name to get started. No account needed.'),
+      form,
+    ),
+  };
 }
 
 async function boot(): Promise<void> {
   show({ name: 'loading' });
   const userId = await currentUserId();
   const player = userId ? await fetchPlayer(userId) : null;
-  show(player ? { name: 'lobby', player } : { name: 'pick-name' });
+  if (!player) {
+    show({ name: 'pick-name' });
+    return;
+  }
+  // A reload while seated in a waiting room goes straight back to it.
+  const room = await fetchSeatedRoom(player.id);
+  show(room ? { name: 'room', player, room } : { name: 'lobby', player });
 }
 
-boot().catch((err: unknown) => {
-  console.error(err);
-  root.replaceChildren(
-    h('div', { className: 'panel' }, h('p', { className: 'error' }, err instanceof Error ? err.message : String(err))),
-  );
-});
+boot().catch(showError);
