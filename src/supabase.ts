@@ -21,3 +21,5 @@ export const supabase = createClient<Database>(url, anonKey, {
     autoRefreshToken: true,
   },
 });
+
+export type AppClient = typeof supabase;

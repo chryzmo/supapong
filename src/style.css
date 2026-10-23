@@ -164,3 +164,34 @@ button:disabled {
   color: var(--error);
   min-height: 1.2em;
 }
+
+.notice {
+  color: var(--text);
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  padding: 8px 12px;
+  border-radius: 4px;
+}
+
+.roster li .tags {
+  display: flex;
+  gap: 6px;
+}
+
+.tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.tag.you {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rooms li.open {
+  color: var(--muted);
+  border-style: dashed;
+}

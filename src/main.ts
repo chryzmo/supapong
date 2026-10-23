@@ -1,15 +1,18 @@
 import { currentUserId, ensureSignedIn, fetchPlayer, savePlayer, signOut } from './auth';
 import { fetchRoom, fetchSeatedRoom } from './lobby/api';
 import { lobbyScreen } from './lobby/lobby';
-import { waitingScreen } from './room/waiting';
-import { DISPLAY_NAME_MAX, validateDisplayName, type Player, type SeatedRoom } from './types';
+import { matchScreen } from './room/match';
+import { RoomSession } from './room/session';
+import { waitingScreen, type RoomActions } from './room/waiting';
+import { DISPLAY_NAME_MAX, validateDisplayName, type Gate, type Player, type SeatedRoom } from './types';
 import { errorMessage, h, type View } from './ui';
 
 type Screen =
   | { name: 'loading' }
   | { name: 'pick-name'; current?: Player }
-  | { name: 'lobby'; player: Player }
-  | { name: 'room'; player: Player; room: SeatedRoom };
+  | { name: 'lobby'; player: Player; notice?: string }
+  | { name: 'room'; player: Player; room: SeatedRoom }
+  | { name: 'match'; player: Player; gates: Gate[] };
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Missing #app element.');
@@ -17,10 +20,25 @@ const root: HTMLElement = app;
 
 let current: View | undefined;
 
+// The room session outlives individual screens: it's opened on entering a
+// room, carried from the waiting room into the match, and closed on leaving.
+let session: RoomSession | undefined;
+
 function show(screen: Screen): void {
   current?.dispose?.();
+  if (screen.name !== 'room' && screen.name !== 'match' && session) {
+    void session.close();
+    session = undefined;
+  }
   current = render(screen);
   root.replaceChildren(current.el);
+}
+
+function roomActions(player: Player): RoomActions {
+  return {
+    started: (gates) => show({ name: 'match', player, gates }),
+    left: (notice) => show({ name: 'lobby', player, notice }),
+  };
 }
 
 function showError(err: unknown): void {
@@ -37,9 +55,9 @@ function render(screen: Screen): View {
     case 'pick-name':
       return pickNameScreen(screen.current);
     case 'lobby': {
-      const { player } = screen;
-      return lobbyScreen(player, {
-        enterRoom(roomId, seat) {
+      const { player, notice } = screen;
+      const actions = {
+        enterRoom(roomId: string, seat: number) {
           fetchRoom(roomId, seat)
             .then((room) => show({ name: 'room', player, room }))
             .catch(showError);
@@ -50,11 +68,20 @@ function render(screen: Screen): View {
             .then(() => show({ name: 'pick-name' }))
             .catch(showError);
         },
-      });
+      };
+      return lobbyScreen(player, actions, notice);
     }
     case 'room': {
       const { player, room } = screen;
-      return waitingScreen(player, room, { left: () => show({ name: 'lobby', player }) });
+      if (session?.room.id !== room.id) {
+        void session?.close();
+        session = new RoomSession(room, player);
+      }
+      return waitingScreen(session, roomActions(player));
+    }
+    case 'match': {
+      if (!session) throw new Error('No room session for the match.');
+      return matchScreen(session, screen.gates, roomActions(screen.player));
     }
   }
 }

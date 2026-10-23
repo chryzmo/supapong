@@ -80,10 +80,10 @@ match_results (
 
 - **Lobby:** subscribe to Postgres Changes on `rooms` and `room_players`, and refetch `lobby_rooms` whenever one fires.  This is simple and the traffic is low.
 - **Room channel** `room:{id}`:
-  - **Presence** tracks who is actually connected.  When a player's presence leaves, the host deletes their `room_players` row.
+  - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
   - **Broadcast `input`** (client → all): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.
   - **Broadcast `state`** (host → all, about 20 Hz): ball position and velocity, every paddle angle, scores, and a tick number.
-  - **Broadcast `event`** (host → all): `start`, `goal`, `end`.
+  - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), and later `goal` and `end`.
 
 ### Host-authoritative simulation
 

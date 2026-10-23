@@ -8,7 +8,8 @@ export interface LobbyActions {
   signOut(): void;
 }
 
-export function lobbyScreen(player: Player, actions: LobbyActions): View {
+/** @param notice Shown at the top, e.g. why the player was sent back from a room. */
+export function lobbyScreen(player: Player, actions: LobbyActions, notice?: string): View {
   const status = h('p', { className: 'error' });
   const list = h('ul', { className: 'rooms' });
 
@@ -124,6 +125,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions): View {
       h('h1', {}, `Hi, ${player.displayName}`),
       h('div', { className: 'row' }, renameButton, signOutButton),
     ),
+    ...(notice ? [h('p', { className: 'notice' }, notice)] : []),
     h('h2', {}, 'Open rooms'),
     list,
     h('h2', {}, 'New room'),

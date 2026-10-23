@@ -3,9 +3,9 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, inject } from 'vitest';
 import type { Database } from '../../src/database.types';
-import type { supabase } from '../../src/supabase';
+import type { AppClient } from '../../src/supabase';
 
-export type AppClient = typeof supabase;
+export type { AppClient };
 
 export const stack = inject('stack');
 

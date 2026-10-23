@@ -1,0 +1,37 @@
+// Database calls used by a room session.  They take the client explicitly
+// because a session keeps using the client it was opened with.
+import type { AppClient } from '../supabase';
+
+export async function fetchSeatIds(client: AppClient, roomId: string): Promise<string[]> {
+  const { data, error } = await client.from('room_players').select('player_id').eq('room_id', roomId);
+  if (error) throw error;
+  return data.map((row) => row.player_id);
+}
+
+export async function hasSeat(client: AppClient, roomId: string, playerId: string): Promise<boolean> {
+  const { count, error } = await client
+    .from('room_players')
+    .select('*', { count: 'exact', head: true })
+    .eq('room_id', roomId)
+    .eq('player_id', playerId);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+/** Host only (RLS): removes a player's seat, e.g. after their Presence is gone. */
+export async function removePlayer(client: AppClient, roomId: string, playerId: string): Promise<void> {
+  const { error } = await client.from('room_players').delete().eq('room_id', roomId).eq('player_id', playerId);
+  if (error) throw error;
+}
+
+/** Host only (checked in set_room_status). */
+export async function setRoomStatus(client: AppClient, roomId: string, status: 'playing' | 'finished'): Promise<void> {
+  const { error } = await client.rpc('set_room_status', { p_room_id: roomId, p_status: status });
+  if (error) throw error;
+}
+
+/** Host only (RLS): deletes the room, which removes every seat through `on delete cascade`. */
+export async function deleteRoom(client: AppClient, roomId: string): Promise<void> {
+  const { error } = await client.from('rooms').delete().eq('id', roomId);
+  if (error) throw error;
+}
