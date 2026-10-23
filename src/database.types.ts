@@ -23,7 +23,33 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "profiles": {
+            "match_results": {
+                  Row: {
+                    "finished_at": string,"id": string,"room_id": string,"scores": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "finished_at"?: string,"id"?: string,"room_id": string,"scores": NonNullable<Json>
+                  }
+                  Update: {
+                    "finished_at"?: string,"id"?: string,"room_id"?: string,"scores"?: NonNullable<Json>
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "match_results_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "lobby_rooms"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "match_results_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "rooms"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"profiles": {
                   Row: {
                     "display_name": string,"id": string
                   }
@@ -37,13 +63,87 @@ export type Database = {
                   Relationships: [
                     
                   ]
+                },"room_players": {
+                  Row: {
+                    "joined_at": string,"player_id": string,"room_id": string,"seat": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "joined_at"?: string,"player_id": string,"room_id": string,"seat": number
+                  }
+                  Update: {
+                    "joined_at"?: string,"player_id"?: string,"room_id"?: string,"seat"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "room_players_player_id_fkey"
+      columns: ["player_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "room_players_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "lobby_rooms"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "room_players_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "rooms"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"rooms": {
+                  Row: {
+                    "created_at": string,"host_id": string,"id": string,"max_players": number,"name": string,"status": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"host_id": string,"id"?: string,"max_players": number,"name": string,"status"?: string
+                  }
+                  Update: {
+                    "created_at"?: string,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"status"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "rooms_host_id_fkey"
+      columns: ["host_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
                 }
           }
           Views: {
-            [_ in never]: never
+            "lobby_rooms": {
+                  Row: {
+                    "created_at": string,"host_id": string,"host_name": string,"id": string,"max_players": number,"name": string,"player_count": number | null
+                  }
+                  ComputedFields: never
+                  Relationships: [
+                    {
+      foreignKeyName: "rooms_host_id_fkey"
+      columns: ["host_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
+                }
           }
           Functions: {
-            [_ in never]: never
+            "create_room":
+{ Args: { "p_max_players": number,"p_name": string }; Returns: string
+                           },
+"join_room":
+{ Args: { "p_room_id": string }; Returns: number
+                           },
+"set_room_status":
+{ Args: { "p_room_id": string,"p_status": string }; Returns: undefined
+                           }
           }
           Enums: {
             [_ in never]: never

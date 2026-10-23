@@ -72,8 +72,8 @@ match_results (
 ### RLS
 
 - `profiles`: anyone authenticated can read.  You can only insert or update your own row.
-- `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  Only the host can update `status`.
-- `room_players`: anyone authenticated can read.  You can only delete your own row (leaving).  Inserts go only through `join_room`.
+- `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.
+- `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players)`, which creates the room and seats the host in one transaction.
 - `match_results`: anyone authenticated can read.  Only the room's host can insert.
 
 ### Realtime
@@ -149,6 +149,8 @@ supabase/
 npm install
 npx supabase start
 npx supabase db reset      # apply migrations + seed
+npx supabase test db       # pgTAP tests in supabase/tests
+npm run gen:types          # regenerate src/database.types.ts after a schema change
 npm run dev
 npm test
 ```
