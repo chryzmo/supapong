@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DISPLAY_NAME_MAX, ROOM_NAME_MAX, validateDisplayName, validateRoomName } from './types';
+import {
+  DISPLAY_NAME_MAX,
+  ROOM_NAME_MAX,
+  parseRoomEvent,
+  parseRosterEntry,
+  validateDisplayName,
+  validateRoomName,
+} from './types';
 
 describe('validateDisplayName', () => {
   it('trims whitespace', () => {
@@ -26,5 +33,54 @@ describe('validateRoomName', () => {
   it('enforces the same max length as the rooms check constraint', () => {
     expect(validateRoomName('x'.repeat(ROOM_NAME_MAX)).ok).toBe(true);
     expect(validateRoomName('x'.repeat(ROOM_NAME_MAX + 1)).ok).toBe(false);
+  });
+});
+
+describe('parseRosterEntry', () => {
+  const entry = { playerId: 'p1', displayName: 'Ada', seat: 3 };
+
+  it('accepts a valid entry and drops extra fields', () => {
+    expect(parseRosterEntry({ ...entry, presence_ref: 'x' })).toEqual(entry);
+  });
+
+  it.each([
+    ['missing id', { displayName: 'Ada', seat: 0 }],
+    ['empty name', { ...entry, displayName: '' }],
+    ['long name', { ...entry, displayName: 'x'.repeat(DISPLAY_NAME_MAX + 1) }],
+    ['fractional seat', { ...entry, seat: 1.5 }],
+    ['negative seat', { ...entry, seat: -1 }],
+    ['seat past the max', { ...entry, seat: 8 }],
+    ['string seat', { ...entry, seat: '1' }],
+    ['array', [entry]],
+    ['null', null],
+  ])('rejects %s', (_label, value) => {
+    expect(parseRosterEntry(value)).toBeNull();
+  });
+});
+
+describe('parseRoomEvent', () => {
+  const gates = [
+    { seat: 0, playerId: 'a', displayName: 'Ada' },
+    { seat: 2, playerId: 'b', displayName: 'Bob' },
+  ];
+
+  it('accepts start, closed and removed', () => {
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates });
+    expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
+    expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
+  });
+
+  it.each([
+    ['an unknown type', { type: 'explode' }],
+    ['a start with one gate', { type: 'start', gates: gates.slice(0, 1) }],
+    ['a start with nine gates', { type: 'start', gates: Array.from({ length: 9 }, (_, i) => ({ seat: i % 8, playerId: `p${i}`, displayName: 'P' })) }],
+    ['a start with a bad gate', { type: 'start', gates: [...gates, { seat: 'x' }] }],
+    ['a start with duplicate seats', { type: 'start', gates: [gates[0], { ...gates[1], seat: 0 }] }],
+    ['a start with duplicate players', { type: 'start', gates: [gates[0], { ...gates[1], playerId: 'a' }] }],
+    ['a start without gates', { type: 'start' }],
+    ['a removed without a player', { type: 'removed' }],
+    ['a string', 'start'],
+  ])('rejects %s', (_label, value) => {
+    expect(parseRoomEvent(value)).toBeNull();
   });
 });
