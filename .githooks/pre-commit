@@ -1,0 +1,4 @@
+#!/bin/sh
+# Enabled by `npm install` (the prepare script sets core.hooksPath to .githooks).
+# Skip once with `git commit --no-verify`.
+exec npm run --silent check

@@ -129,6 +129,11 @@ supabase/
 
 - TypeScript `strict`.  No `any`.  Message payloads are typed in `types.ts` and validated at the boundary.
 - `physics.ts` is pure and deterministic given its inputs.  Unit test it with Vitest.
+- Tests come in three layers:
+  - **Unit** (`src/**/*.test.ts`): pure code only.  Don't import `src/supabase.ts` from them.
+  - **Database** (`supabase/tests/database/*.test.sql`, pgTAP): RLS, constraints, RPC errors and transitions.
+  - **Integration** (`tests/integration/`): real app modules against the local stack, acting as different players via `actAs()`.  Test players get locally signed JWTs instead of anonymous sign-in, to stay under the auth rate limit.
+- New behavior gets a test in the lowest layer that can catch it.  `npm run check` must pass before committing.
 - All schema changes go in migrations, never ad hoc through the dashboard.
 - Keep dependencies minimal.  Ask before adding one.
 - Write small commits with clear messages.
@@ -146,11 +151,13 @@ supabase/
 ## Commands
 
 ```
-npm install
+npm install                # also enables the pre-commit hook (core.hooksPath = .githooks)
 npx supabase start
 npx supabase db reset      # apply migrations + seed
-npx supabase test db       # pgTAP tests in supabase/tests
-npm run gen:types          # regenerate src/database.types.ts after a schema change
 npm run dev
-npm test
+npm test                   # unit tests (no network)
+npm run test:db            # pgTAP tests in supabase/tests
+npm run test:integration   # app code against the local stack
+npm run check              # everything above plus typecheck; the pre-commit hook runs this
+npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```

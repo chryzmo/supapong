@@ -8,6 +8,27 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
-    include: ['src/**/*.test.ts'],
+    projects: [
+      {
+        // Pure code: no network, no DOM.  `npm test`
+        test: {
+          name: 'unit',
+          include: ['src/**/*.test.ts'],
+        },
+      },
+      {
+        // App code against the local Supabase stack.  `npm run test:integration`
+        test: {
+          name: 'integration',
+          include: ['tests/integration/**/*.test.ts'],
+          globalSetup: ['tests/integration/globalSetup.ts'],
+          // One file at a time: the lobby subscription sees every room change,
+          // so rooms created by other files would skew its counts.
+          fileParallelism: false,
+          testTimeout: 20_000,
+          hookTimeout: 20_000,
+        },
+      },
+    ],
   },
 });

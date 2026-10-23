@@ -8,14 +8,19 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "gen:types": "supabase gen types typescript --local > src/database.types.ts"
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "gen:types": "supabase gen types typescript --local > src/database.types.ts",
+    "test:integration": "vitest run --project integration",
+    "test:db": "supabase test db",
+    "check": "bash scripts/check.sh",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "supabase": "^2.122.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",

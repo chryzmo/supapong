@@ -1,7 +1,7 @@
 -- Lobby schema, RLS and RPC tests.  Run with `npx supabase test db`.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(24);
+select plan(43);
 
 -- Five players: A hosts, B-E join.
 insert into auth.users (id, is_anonymous) values
@@ -115,12 +115,71 @@ select is(
   (select count(*)::int from public.room_players rp where not exists (select 1 from public.rooms r where r.id = rp.room_id)),
   0, 'deleting a room removes its seats');
 
+-- Room constraints ---------------------------------------------------------------
+select throws_ok($$ select public.create_room('Solo', 1) $$, '23514', null, 'rooms need at least 2 players');
+select throws_ok($$ select public.create_room('Crowd', 9) $$, '23514', null, 'rooms allow at most 8 players');
+select throws_ok($$ select public.create_room('   ', 4) $$, '23514', null, 'room names cannot be blank');
+select throws_ok($$ select public.create_room(repeat('x', 33), 4) $$, '23514', null, 'room names are at most 32 characters');
+select lives_ok($$ select public.create_room(repeat('x', 32), 4) $$, '32-character room names are allowed');
+
+-- Missing rooms ------------------------------------------------------------------
+select throws_ok(
+  $$ select public.join_room('00000000-0000-0000-0000-000000000000') $$,
+  'P0002', 'That room no longer exists.', 'joining a missing room says so');
+select throws_ok(
+  $$ select public.set_room_status('00000000-0000-0000-0000-000000000000', 'playing') $$,
+  'P0002', 'That room no longer exists.', 'changing a missing room says so');
+
+-- More status transitions --------------------------------------------------------
+select public.create_room('Second room', 4);
+create function pg_temp.second() returns uuid language sql as $$
+  select id from public.rooms where name = 'Second room';
+$$;
+grant execute on function pg_temp.second() to authenticated, anon;
+
+select lives_ok($$ select public.set_room_status(pg_temp.second(), 'finished') $$, 'host can finish a room without starting it');
+select throws_ok(
+  $$ select public.set_room_status(pg_temp.second(), 'playing') $$,
+  'P0001', null, 'finished rooms cannot restart');
+select is((select count(*)::int from public.lobby_rooms where id = pg_temp.second()), 0, 'finished rooms leave the lobby');
+
+insert into public.match_results (room_id, scores) values (pg_temp.second(), '{"a": 3}');
+
+select pg_temp.login('00000000-0000-0000-0000-00000000000b');
+delete from public.rooms where id = pg_temp.second();
+select is((select count(*)::int from public.rooms where id = pg_temp.second()), 1, 'only the host can delete a room');
+select is(
+  (select scores from public.match_results where room_id = pg_temp.second()),
+  '{"a": 3}'::jsonb, 'anyone signed in can read match results');
+
+-- Stale rooms --------------------------------------------------------------------
+reset role;
+insert into public.rooms (name, host_id, max_players, created_at)
+values ('Stale room', '00000000-0000-0000-0000-00000000000a', 4, now() - interval '2 hours');
+set local role authenticated;
+select is((select count(*)::int from public.lobby_rooms where name = 'Stale room'), 0, 'rooms older than an hour are hidden from the lobby');
+select is((select count(*)::int from public.lobby_rooms where name = repeat('x', 32)), 1, 'recent waiting rooms are listed');
+
+-- A token without a user id -------------------------------------------------------
+select set_config('request.jwt.claims', '{"role": "authenticated"}', true);
+select throws_ok(
+  $$ select public.join_room(pg_temp.second()) $$,
+  '28000', 'Not signed in.', 'join_room requires a user id');
+
 -- Signed-out callers -------------------------------------------------------------
 reset role;
 set local role anon;
 select throws_ok(
   $$ select public.join_room('00000000-0000-0000-0000-000000000000') $$,
-  '42501', null, 'anonymous (signed-out) callers cannot call join_room');
+  '42501', null, 'signed-out callers cannot call join_room');
+select throws_ok(
+  $$ select public.create_room('Nope', 2) $$,
+  '42501', null, 'signed-out callers cannot call create_room');
+select throws_ok(
+  $$ select public.set_room_status('00000000-0000-0000-0000-000000000000', 'playing') $$,
+  '42501', null, 'signed-out callers cannot call set_room_status');
+select is((select count(*)::int from public.rooms), 0, 'signed-out callers see no rooms');
+select is((select count(*)::int from public.lobby_rooms), 0, 'signed-out callers see an empty lobby');
 
 select * from finish();
 rollback;
