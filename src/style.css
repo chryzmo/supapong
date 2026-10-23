@@ -24,10 +24,15 @@ body {
 }
 
 #app {
-  width: min(480px, 100% - 32px);
+  width: min(1100px, 100% - 32px);
+  padding: 16px 0;
+  display: grid;
+  justify-items: center;
 }
 
 .panel {
+  width: 100%;
+  max-width: 480px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -157,6 +162,7 @@ button:disabled {
 
 .row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -194,4 +200,65 @@ button:disabled {
 .rooms li.open {
   color: var(--muted);
   border-style: dashed;
+}
+
+/* Game ------------------------------------------------------------------- */
+
+.stage {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+.stage-main {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+canvas.board {
+  width: 100%;
+  max-width: min(720px, 100vh - 120px);
+  aspect-ratio: 1;
+  display: block;
+  border-radius: 12px;
+}
+
+.hud {
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning {
+  gap: 10px;
+}
+
+.tuning label {
+  gap: 4px;
+}
+
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+input[type='range'] {
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: end;
+  padding-bottom: 10px;
+}
+
+@media (max-width: 760px) {
+  .stage {
+    grid-template-columns: 1fr;
+  }
 }

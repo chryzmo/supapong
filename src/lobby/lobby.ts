@@ -4,6 +4,7 @@ import { createRoom, fetchLobbyRooms, joinRoom, subscribeLobby } from './api';
 
 export interface LobbyActions {
   enterRoom(roomId: string, seat: number): void;
+  practice(): void;
   rename(): void;
   signOut(): void;
 }
@@ -115,6 +116,8 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   renameButton.addEventListener('click', () => actions.rename());
   const signOutButton = h('button', { className: 'secondary', type: 'button' }, 'Sign out');
   signOutButton.addEventListener('click', () => actions.signOut());
+  const practiceButton = h('button', { className: 'secondary', type: 'button' }, 'Practice');
+  practiceButton.addEventListener('click', () => actions.practice());
 
   const el = h(
     'div',
@@ -131,6 +134,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     h('h2', {}, 'New room'),
     createForm,
     status,
+    h('div', { className: 'row' }, practiceButton, h('p', { className: 'muted' }, 'Try the physics on your own, against bots.')),
   );
 
   return {

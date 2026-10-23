@@ -105,6 +105,15 @@ match_results (
   - Speed ramps up slightly after each paddle hit, up to a cap.
 - The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host writes `match_results` and sets the room's `status = 'finished'`.
 
+## Frontend
+
+- Screens are plain functions that build DOM elements and return `{ el, dispose }`.  `main.ts` switches between them.  Text goes through `textContent`, never `innerHTML`.
+- One stylesheet (`src/style.css`).  Dark theme, with the Supabase green as the accent.
+- **Board view:** each player sees the board rotated so their own gate is at the bottom.  Then everyone defends "down", and Left/Right on the keyboard move the paddle left/right on screen.  In world terms, +1 is counterclockwise, which is screen-right at the bottom.  Spectators and the sandbox without a seat get no rotation.
+- **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  A gate flashes when it concedes.  Names (cut to 10 characters) and scores sit outside the rim, upright.
+- **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.
+- **Practice:** the sandbox is at `/#sandbox` (no sign-in needed) and behind the lobby's Practice button.  Its "Copy config" button copies the tuned physics settings as JSON for pasting into `DEFAULT_CONFIG`.
+
 ## Project layout
 
 ```
@@ -116,6 +125,11 @@ src/
   room/              channel wiring: presence, broadcast send/receive
   game/
     physics.ts       pure functions, no DOM or network; unit tested
+    bot.ts           computer paddles (sandbox); pure
+    interpolate.ts   blend two states for drawing; pure
+    loop.ts          fixed 60 Hz tick + per-frame draw
+    input.ts         keyboard -> paddle direction
+    sandbox.ts       single-player practice screen with tuning sliders
     host.ts          fixed-step loop, input aggregation, snapshot broadcast
     client.ts        snapshot buffer, interpolation, local paddle prediction
     render.ts        Canvas 2D drawing

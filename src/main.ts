@@ -1,4 +1,5 @@
 import { currentUserId, ensureSignedIn, fetchPlayer, savePlayer, signOut } from './auth';
+import { sandboxScreen } from './game/sandbox';
 import { fetchRoom, fetchSeatedRoom } from './lobby/api';
 import { lobbyScreen } from './lobby/lobby';
 import { matchScreen } from './room/match';
@@ -12,7 +13,8 @@ type Screen =
   | { name: 'pick-name'; current?: Player }
   | { name: 'lobby'; player: Player; notice?: string }
   | { name: 'room'; player: Player; room: SeatedRoom }
-  | { name: 'match'; player: Player; gates: Gate[] };
+  | { name: 'match'; player: Player; gates: Gate[] }
+  | { name: 'sandbox'; back: () => void };
 
 const app = document.querySelector<HTMLElement>('#app');
 if (!app) throw new Error('Missing #app element.');
@@ -62,6 +64,7 @@ function render(screen: Screen): View {
             .then((room) => show({ name: 'room', player, room }))
             .catch(showError);
         },
+        practice: () => show({ name: 'sandbox', back: () => show({ name: 'lobby', player }) }),
         rename: () => show({ name: 'pick-name', current: player }),
         signOut() {
           signOut()
@@ -83,6 +86,8 @@ function render(screen: Screen): View {
       if (!session) throw new Error('No room session for the match.');
       return matchScreen(session, screen.gates, roomActions(screen.player));
     }
+    case 'sandbox':
+      return sandboxScreen({ back: screen.back });
   }
 }
 
@@ -132,6 +137,17 @@ function pickNameScreen(current?: Player): View {
 }
 
 async function boot(): Promise<void> {
+  // /#sandbox opens the physics sandbox directly, no sign-in needed.
+  if (location.hash === '#sandbox') {
+    show({
+      name: 'sandbox',
+      back() {
+        history.replaceState(null, '', location.pathname);
+        boot().catch(showError);
+      },
+    });
+    return;
+  }
   show({ name: 'loading' });
   const userId = await currentUserId();
   const player = userId ? await fetchPlayer(userId) : null;
