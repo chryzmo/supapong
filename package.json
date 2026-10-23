@@ -1,0 +1,24 @@
+{
+  "name": "supapong",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "gen:types": "supabase gen types typescript --local > src/database.types.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0"
+  },
+  "devDependencies": {
+    "supabase": "^2.122.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}
