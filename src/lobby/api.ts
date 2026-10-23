@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { isPostgresChangesReady } from '../realtime';
 import type { LobbyRoom, SeatedRoom } from '../types';
 
 export async function fetchLobbyRooms(): Promise<LobbyRoom[]> {
@@ -90,11 +91,14 @@ export function subscribeLobby(onChange: () => void): () => void {
     .channel('lobby')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fire)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, fire)
-    // Refetch once subscribed, to catch anything that changed between the
-    // first fetch and the subscription going live.
-    .subscribe((status) => {
-      if (status === 'SUBSCRIBED') fire();
-    });
+    // Refetch once the change feed is live, to catch anything that changed
+    // since the first fetch.  The channel's SUBSCRIBED status isn't enough:
+    // it can arrive before Postgres Changes are flowing, especially just
+    // after the stack starts.  Realtime sends this system message when they are.
+    .on('system', {}, (payload: unknown) => {
+      if (isPostgresChangesReady(payload)) fire();
+    })
+    .subscribe();
 
   return () => {
     clearTimeout(timer);
