@@ -7,18 +7,27 @@ import { actAs, admin, cleanupUser, stack } from './helpers';
 
 vi.mock('../../src/supabase', () => import('./helpers').then((m) => m.appSupabaseModule));
 
+// Cloudflare's Turnstile test secret in supabase/config.toml accepts this token.
+const TEST_CAPTCHA_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
+
 it('signs in anonymously, saves a profile, and signs out', async () => {
   actAs({ client: createClient<Database>(stack.url, stack.anonKey, { auth: { persistSession: false } }) });
 
   expect(await currentUserId()).toBeNull();
 
-  const userId = await ensureSignedIn();
+  // The local stack requires a CAPTCHA, like the hosted project.
+  await expect(ensureSignedIn()).rejects.toMatchObject({ code: 'captcha_failed' });
+
+  const userId = await ensureSignedIn(() => Promise.resolve(TEST_CAPTCHA_TOKEN));
   cleanupUser(userId);
   const { data } = await admin.auth.admin.getUserById(userId);
   expect(data.user?.is_anonymous).toBe(true);
 
-  // A second call reuses the session instead of creating another user.
-  expect(await ensureSignedIn()).toBe(userId);
+  // A second call reuses the session instead of creating another user, and
+  // doesn't ask for a CAPTCHA token.
+  const captchaToken = vi.fn(() => Promise.resolve(TEST_CAPTCHA_TOKEN));
+  expect(await ensureSignedIn(captchaToken)).toBe(userId);
+  expect(captchaToken).not.toHaveBeenCalled();
   expect(await currentUserId()).toBe(userId);
 
   expect(await fetchPlayer(userId)).toBeNull();

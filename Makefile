@@ -99,9 +99,18 @@ build-prod: ## Build for the hosted project, from .env.production.local
 		echo "Without it, the build would point at your local stack (.env.local)."; \
 		exit 1; \
 	fi
+	@if [ -z "$$VITE_TURNSTILE_SITE_KEY" ] && ! grep -qs '^VITE_TURNSTILE_SITE_KEY=.' .env.production.local; then \
+		echo "Missing VITE_TURNSTILE_SITE_KEY in .env.production.local (the Turnstile widget's site key)."; \
+		echo "Without it, the build would use the test key from .env.local."; \
+		exit 1; \
+	fi
 	npm run build
 	@if grep -rqE '127\.0\.0\.1:54321|localhost:54321' dist; then \
 		echo "dist/ points at the local Supabase stack; refusing to use it for a deploy."; \
+		exit 1; \
+	fi
+	@if grep -rqE '[123]x00000000000000000000(AA|BB|FF)' dist; then \
+		echo "dist/ uses a Turnstile test site key; set VITE_TURNSTILE_SITE_KEY in .env.production.local."; \
 		exit 1; \
 	fi
 

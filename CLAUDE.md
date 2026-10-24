@@ -31,6 +31,7 @@ Multiplayer Pong on a circular board.  Each player defends a goal gate on the ri
 
 - Use Supabase **anonymous sign-in**.  The player picks a display name, which is stored in `profiles`.
 - There is no email or password.  We can convert anonymous users to real accounts later.
+- Sign-in is protected by a Cloudflare Turnstile CAPTCHA (`src/captcha.ts`), which Supabase Auth verifies.  The widget only shows for a new sign-in, and only when Cloudflare wants an interaction.  The local stack uses Cloudflare's always-pass test keys, so dev runs the same path.
 
 ### Data model (Postgres)
 
@@ -122,6 +123,7 @@ src/
   main.ts            app entry, screen routing
   supabase.ts        client init (env: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
   auth.ts            anonymous sign-in, profile upsert
+  captcha.ts         Turnstile widget, loaded from Cloudflare on demand
   lobby/             lobby screen, room list, create room
   room/              channel wiring: presence, broadcast send/receive
   game/

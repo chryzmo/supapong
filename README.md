@@ -78,6 +78,7 @@ sequenceDiagram
 | Need | Supabase feature | Why this one | Where |
 |---|---|---|---|
 | Know who each player is without a signup form | **Anonymous sign-in** | Every player gets a real `auth.users` row and a JWT, so RLS can use `auth.uid()` exactly as it would for a real account.  An anonymous user can later be linked to email or OAuth without changing their id. | [`src/auth.ts`](src/auth.ts) |
+| Keep scripts from minting users | **Auth CAPTCHA** (Cloudflare Turnstile) | Supabase verifies the token on sign-in itself, so bot protection needs no backend code.  Turnstile is usually invisible, and the site is already on Cloudflare.  The local stack uses Cloudflare's always-pass test keys, so the same code path runs in dev. | [`src/captcha.ts`](src/captcha.ts) |
 | Public names, private writes | **Postgres + RLS** on `profiles` | `auth.users` isn't exposed through the API.  A plain table with "anyone signed in can read, you can only write your own row" takes a few lines, and other tables can reference it with real foreign keys. | [`profiles.sql`](supabase/migrations/20261023222216_profiles.sql) |
 | Rules that live next to the data | **RLS** on `rooms`, `room_players`, `match_results` | The browser talks to the database through the generated API.  The rules for who can create, leave, remove, delete and read live in the database, not in client code that could be bypassed. | [`rooms.sql`](supabase/migrations/20261023225908_rooms.sql) |
 | Two players must never get the same seat | **RPC** `join_room` (`security definer`) | Choosing the lowest free seat is a read followed by a write.  From the client, two joins could read the same free seat.  The RPC locks the room row (`for update`), so joins to one room happen one at a time.  An integration test fires 12 joins at an 8-seat room at once. | [`lobby_rpcs.sql`](supabase/migrations/20261023225909_lobby_rpcs.sql) |
@@ -148,7 +149,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
   - Seat removal is the host's job.
   - Waiting rooms whose host vanished stay in the database, hidden from the lobby after an hour.
   - Finished rooms and their seats are never deleted.
-- **Anonymous sign-in is open.** On a public deployment, add CAPTCHA (Supabase supports Turnstile and hCaptcha) and keep the rate limits.  The local config raises the per-IP anonymous limit to 100 an hour for testing.
+- **Anonymous sign-in is behind a CAPTCHA, and that's all.** Turnstile stops scripted sign-ups, and Supabase's per-IP rate limit backs it up.  The local config raises that limit to 100 an hour for testing.
 - **Players are anonymous.** Clearing the tab's storage means a new identity.  Accounts would come from linking anonymous users to email or OAuth.
 
 ## What changes at scale
@@ -199,7 +200,9 @@ Vite bakes `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` into the bundle at *
 | Build command | `npm run build` |
 | Build output directory | `dist` |
 | Production branch | `main` |
-| Environment variables (Production and Preview) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` |
+| Environment variables (Production and Preview) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key), `VITE_TURNSTILE_SITE_KEY` |
+
+Add them as plain-text variables, not secrets: secrets aren't available to the build.  If they're missing when a build runs, add them and retry the deployment.
 
 The build uses Node 24 from [`.node-version`](.node-version).  Every push to `main` deploys to production, and other branches get preview URLs.  The `prepare` script that sets up the git hook also runs during `npm install` there, which is harmless.
 
@@ -210,6 +213,7 @@ The build uses Node 24 from [`.node-version`](.node-version).  Every push to `ma
 cat > .env.production.local <<'ENV'
 VITE_SUPABASE_URL=https://<ref>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon key>
+VITE_TURNSTILE_SITE_KEY=<Turnstile site key>
 ENV
 
 npx wrangler@4.149.0 login                # once; or set CLOUDFLARE_API_TOKEN
@@ -217,13 +221,13 @@ make pages-create CF_PAGES_PROJECT=<name> # once
 make deploy-web CF_PAGES_PROJECT=<name>   # build, check, upload
 ```
 
-`make deploy-web` refuses to deploy if `.env.production.local` is missing, or if the built files still point at `127.0.0.1:54321`.  Without that file, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
+`make deploy-web` refuses to deploy if `.env.production.local` is missing or has no Turnstile site key, or if the built files still point at `127.0.0.1:54321` or use Turnstile's test key.  Without that file, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
 
 ### 4. After the first deploy
 
 - **Site URL:** set the Pages URL (for example `https://<name>.pages.dev`) as the **Site URL** in Supabase's Auth URL configuration.  Anonymous sign-in doesn't redirect, so nothing breaks without it today, but email or OAuth sign-in will need it.
 - **Routing:** none needed.  The app only uses `/` and `/#sandbox`, so Pages needs no single-page-app fallback rules.
-- **Before sharing the link:** turn on CAPTCHA for sign-ins.  Cloudflare Turnstile fits naturally here: create a Turnstile widget for the Pages domain, then turn on CAPTCHA protection in Supabase's Auth settings with Turnstile as the provider and the widget's secret key.  **The app doesn't send a CAPTCHA token yet**, so turning this on today blocks sign-in.  The frontend needs to render the Turnstile widget and pass its token as `options.captchaToken` to `signInAnonymously()` in [`src/auth.ts`](src/auth.ts).
+- **CAPTCHA:** in Cloudflare, add a **Turnstile** widget for the Pages hostname (managed mode).  Put its **site key** in the frontend as `VITE_TURNSTILE_SITE_KEY` and redeploy.  Then, in Supabase's Auth **Attack Protection** settings, turn on CAPTCHA with Turnstile as the provider and the widget's **secret key**.  Do it in that order: Supabase ignores tokens while CAPTCHA is off, but once it's on, a frontend without the site key can't sign anyone in.
 - **Tests stay local.** Never point the integration tests at a hosted project.  They sign tokens with the local stack's secret, and create and delete users.
 
 ## Project layout

@@ -212,10 +212,13 @@ token_verifications = 30
 web3 = 30
 
 # Configure one of the supported captcha providers: `hcaptcha`, `turnstile`.
-# [auth.captcha]
-# enabled = true
-# provider = "hcaptcha"
-# secret = ""
+# On locally, like the hosted project, so the CAPTCHA code path runs in dev.
+# This is Cloudflare's published test secret: it accepts any token from the
+# test site key in .env.example.  The hosted secret is set in the dashboard.
+[auth.captcha]
+enabled = true
+provider = "turnstile"
+secret = "1x0000000000000000000000000000000AA"
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.

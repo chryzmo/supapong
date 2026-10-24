@@ -1,4 +1,5 @@
 import { currentUserId, ensureSignedIn, fetchPlayer, savePlayer, signOut } from './auth';
+import { captchaSiteKey, captchaWidget } from './captcha';
 import { sandboxScreen } from './game/sandbox';
 import { fetchRoom, fetchSeatedRoom } from './lobby/api';
 import { lobbyScreen } from './lobby/lobby';
@@ -118,8 +119,10 @@ function pickNameScreen(current?: Player): View {
   });
   const error = h('p', { className: 'error' });
   const submit = h('button', { type: 'submit' }, current ? 'Save' : 'Play');
+  // Only a new player signs in, so renaming skips the CAPTCHA.
+  const captcha = !current && captchaSiteKey ? captchaWidget(captchaSiteKey) : undefined;
 
-  const form = h('form', {}, h('label', {}, 'Display name', input), error, submit);
+  const form = h('form', {}, h('label', {}, 'Display name', input), ...(captcha ? [captcha.el] : []), error, submit);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const result = validateDisplayName(input.value);
@@ -132,12 +135,14 @@ function pickNameScreen(current?: Player): View {
     try {
       // Sign in only once the player commits to a name, so just opening the
       // page doesn't create an anonymous user.
-      const userId = await ensureSignedIn();
+      const userId = await ensureSignedIn(captcha && (() => captcha.token()));
       const player = await savePlayer(userId, result.value);
       show({ name: 'lobby', player });
     } catch (err) {
       error.textContent = errorMessage(err);
       submit.disabled = false;
+      // A token works once, so a retry needs a fresh one.
+      captcha?.reset();
     }
   });
 
@@ -150,6 +155,7 @@ function pickNameScreen(current?: Player): View {
       h('p', {}, current ? 'Change your display name.' : 'Pick a name to get started. No account needed.'),
       form,
     ),
+    dispose: () => captcha?.dispose(),
   };
 }
 

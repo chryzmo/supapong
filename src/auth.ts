@@ -13,12 +13,17 @@ export async function currentUserId(): Promise<string | null> {
   return data.session?.user.id ?? null;
 }
 
-/** Signs in anonymously if there's no session yet, and returns the user id. */
-export async function ensureSignedIn(): Promise<string> {
+/**
+ * Signs in anonymously if there's no session yet, and returns the user id.
+ * `captchaToken` is only called when a new user is actually created, since
+ * Supabase checks the CAPTCHA on sign-in and nowhere else.
+ */
+export async function ensureSignedIn(captchaToken?: () => Promise<string>): Promise<string> {
   const existing = await currentUserId();
   if (existing) return existing;
 
-  const { data, error } = await supabase.auth.signInAnonymously();
+  const options = captchaToken ? { captchaToken: await captchaToken() } : {};
+  const { data, error } = await supabase.auth.signInAnonymously({ options });
   if (error) throw error;
   if (!data.user) throw new Error('Anonymous sign-in returned no user.');
   return data.user.id;

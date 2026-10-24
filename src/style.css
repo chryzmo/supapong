@@ -171,6 +171,11 @@ button:disabled {
   min-height: 1.2em;
 }
 
+/* Turnstile draws here only when it needs a click. */
+.captcha:empty {
+  display: none;
+}
+
 .notice {
   color: var(--text);
   background: var(--bg);
