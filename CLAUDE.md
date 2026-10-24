@@ -79,10 +79,11 @@ match_results (
 
 ### Realtime
 
-- **Lobby:** subscribe to Postgres Changes on `rooms` and `room_players`, and refetch `lobby_rooms` whenever one fires.  This is simple and the traffic is low.
-- **Room channel** `room:{id}`:
+- Every channel is **private** (Realtime Authorization: RLS policies on `realtime.messages`, checked at join).  The project refuses public channels.
+- **Lobby:** subscribe to Postgres Changes on `rooms` and `room_players`, and refetch `lobby_rooms` whenever one fires.  This is simple and the traffic is low.  Any signed-in player can read the `lobby` channel; nobody can broadcast on it.
+- **Room channels** `room:{id}` and `room:{id}:input`.  Only seated players can join either.  Policies can't tell broadcast events apart, so traffic is split by sender: only the host may broadcast on `room:{id}`, and inputs go on `room:{id}:input`.
   - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
-  - **Broadcast `input`** (client → all): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.  Only the host acts on it.
+  - **Broadcast `input`** (client → all, on `room:{id}:input`): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.  Only the host acts on it.
   - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
   - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
 

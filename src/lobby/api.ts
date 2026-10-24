@@ -88,9 +88,10 @@ export function subscribeLobby(onChange: () => void): () => void {
 
   // `wait: true` holds SUBSCRIBED until Postgres Changes are actually flowing.
   // Without it, SUBSCRIBED can arrive first (especially just after the stack
-  // starts) and changes in that gap are missed.
+  // starts) and changes in that gap are missed.  The channel is private so
+  // the project can refuse public channels; any signed-in player may join.
   const channel = supabase
-    .channel('lobby', { config: { postgres_changes_options: { wait: true } } })
+    .channel('lobby', { config: { private: true, postgres_changes_options: { wait: true } } })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, fire)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, fire)
     // Refetch once live, to catch anything that changed since the first fetch.

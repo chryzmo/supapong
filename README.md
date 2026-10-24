@@ -45,7 +45,7 @@ flowchart LR
   B -- "REST + RPC with the player's JWT" --> DB
   DB -- "Postgres Changes" --> RT
   RT -- "lobby: something changed" --> B
-  B <-- "room:{id} channel<br/>Presence: who's connected<br/>Broadcast: input · state · events" --> RT
+  B <-- "private room channels<br/>room:{id}: Presence · state · events<br/>room:{id}:input: inputs" --> RT
 ```
 
 What happens over one match:
@@ -87,12 +87,12 @@ sequenceDiagram
 | Lobby updates live | **Realtime Postgres Changes** | Room lists change rarely, so "tell me something changed and I'll refetch" is simple and cheap.  For inserts and updates, Realtime checks RLS before delivering the change.  Deletes always go through, but carry only the key.  The channel uses `postgres_changes_options: { wait: true }`, so the first refetch happens only once changes are flowing.  Without it, changes made just after subscribing could be missed. | [`src/lobby/api.ts`](src/lobby/api.ts) |
 | Who is actually connected | **Realtime Presence** | The database knows who holds a seat, not who is online.  Presence is tied to the socket, so a closed tab or a dropped network shows up as a leave, with no heartbeat code of ours. | [`src/room/session.ts`](src/room/session.ts) |
 | Game traffic: inputs, snapshots, room events | **Realtime Broadcast** | These only matter to people connected right now, so writing them to a table would be wasted work.  Broadcast sends them straight to the other sockets on the channel. | same, and [`src/game/`](src/game/) |
+| Only seated players in a room's channels, only the host sends game state | **Realtime Authorization** (private channels) | RLS policies on `realtime.messages` are checked when a client joins, against the same `room_players` and `rooms` tables as everything else.  Policies can tell broadcast from presence but not one event from another, so traffic is split by sender: on `room:{id}` only the host may broadcast, and inputs go on `room:{id}:input`.  The lobby channel is private too (read only), so the project refuses public channels altogether. | [`private_room_channels.sql`](supabase/migrations/20261024020243_private_room_channels.sql) |
 | Schema you can review, reproduce and test | **Supabase CLI**: migrations, local stack, `supabase test db` (pgTAP), `gen types` | Every schema change is a migration file.  The local stack runs the same Postgres, Auth and Realtime as production.  RLS and RPCs have SQL tests, and `src/database.types.ts` is generated, so queries are type-checked. | [`supabase/`](supabase/) |
 
 Deliberately not used yet:
 - **Edge Functions:** nothing needs server-side code, because the host's browser runs the game.
 - **Storage:** there are no files.
-- **Realtime Authorization (private channels):** see [Known limitations](#known-limitations).
 
 ## Netcode
 
@@ -109,7 +109,7 @@ The design is host-authoritative with client-side interpolation.
 
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
-| `input` | guest → host | on change only | `{ seat, dir }`, where `dir` is -1, 0 or 1 |
+| `input` | guest → host, on `room:{id}:input` | on change only | `{ seat, dir }`, where `dir` is -1, 0 or 1 |
 | `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
 | `event` | host → all | rare | `start` (gate order), `goal`, `end` (scores), `closed`, `removed` |
 
@@ -142,7 +142,8 @@ The tests don't cover the DOM screens themselves.  Those were checked during dev
 These are deliberate trade-offs for a prototype.  Each one is noted where it lives in the code.
 
 - **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.
-- **Room channels are public.** Anyone who knows a room id can join `room:{id}` and broadcast fake `start`, `closed` or `state` messages.  A guest's `input` claims a seat number nobody checks.  Messages are checked for shape, not for sender.
+- **Seated players can spoof each other's inputs.** Room channels are private: outsiders can't join, and only the host can broadcast state and events.  But a Broadcast message doesn't carry its sender, so a guest's `input` claims a seat number the host can't verify.  A seated player could move someone else's paddle.
+- **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **You see your paddle "now" and the ball 100 ms ago.** On a slow connection, a save that looked like a hit on your screen can be a goal on the host.  That's the usual price of interpolating everything except your own paddle.
 - **Launches are aimed at gates.** An early version launched in any direction.  A launch into a wall travels along a diameter, and a plain bounce keeps it there.  With an even number of gates every wall faces another wall, so about 40% of launches with 2 or 4 gates bounced out of everyone's reach forever.  Launches now aim at a random point inside a random active gate, so each one reaches a player in about 1.6 s.  Wall bounces also add a small random turn (±5°), so later rallies can't settle on a diameter either.
 - **Cleanup happens in browsers.**
@@ -155,7 +156,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
 ## What changes at scale
 
 - **Authority moves to a server.** A dedicated game process (a small Node or Go service, or a managed game server) would run the physics.  Supabase would keep handling identity, rooms, results and the lobby, and could keep carrying the traffic over Broadcast.  Edge Functions aren't a fit for a 60 Hz loop that lasts minutes.
-- **Private channels.** [Realtime Authorization](https://supabase.com/docs/guides/realtime/authorization) puts RLS on `realtime.messages`, so only seated players can join `room:{id}` and only the host can send `state` and `event`.  Inputs would be tied to the sender instead of a claimed seat.
+- **Inputs tied to their sender.** With a game server, each player's input would arrive over their own authenticated connection, instead of claiming a seat on a shared channel.
 - **Server-side housekeeping.** `pg_cron` jobs would close abandoned rooms, delete old seats and finish matches whose host disappeared, instead of relying on a browser being open.
 - **The lobby scales differently.** Every lobby client refetching on every room change is fine for dozens of rooms.  For thousands, you'd want:
   - lobby updates broadcast from a database trigger (`realtime.broadcast_changes`) carrying the changed row;
@@ -179,7 +180,7 @@ The backend goes to a hosted Supabase project.  The frontend is static files (`d
    make db-diff   # lists the migrations db-push would apply
    ```
 
-3. Turn on **anonymous sign-ins** in the dashboard's Auth settings.  Do it there rather than with `supabase config push`, because `supabase/config.toml` contains local-only settings: the `127.0.0.1` site URL, the raised anonymous rate limit, and analytics turned off for Podman.
+3. Turn on **anonymous sign-ins** in the dashboard's Auth settings, and turn off **Allow public access** in the Realtime settings, since every channel the app uses is private.  Do it there rather than with `supabase config push`, because `supabase/config.toml` contains local-only settings: the `127.0.0.1` site URL, the raised anonymous rate limit, and analytics turned off for Podman.
 4. Copy the project URL and anon (publishable) key from the project's API settings.  You'll need them for the frontend.
 
 ### 2. Migrations (every schema change)

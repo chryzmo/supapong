@@ -3,7 +3,7 @@
 // they would in their own browser tab.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomSession, type SessionListener } from '../../src/room/session';
-import type { RoomEvent, RosterEntry, SeatedRoom } from '../../src/types';
+import type { InputMessage, RoomEvent, RosterEntry, SeatedRoom } from '../../src/types';
 import { admin, createPlayer, delay, waitFor, type TestPlayer } from './helpers';
 
 // RoomSession imports the app client module; the tests always pass a client explicitly.
@@ -231,8 +231,9 @@ describe('leave', () => {
 describe('message validation', () => {
   it('ignores malformed broadcasts', async () => {
     const { room, guests } = await setup(1);
-    const intruder = await createPlayer('Intruder');
-    const channel = intruder.client.channel(`room:${room.id}`);
+    // Only the host may broadcast to the room, so the bad messages come from
+    // the service role, which bypasses the channel policies.
+    const channel = admin.channel(`room:${room.id}`, { config: { private: true } });
     await new Promise<void>((resolve) => channel.subscribe((status) => status === 'SUBSCRIBED' && resolve()));
 
     for (const payload of [{ type: 'start', gates: 'all of them' }, { type: 'explode' }, 'closed', null]) {
@@ -242,6 +243,37 @@ describe('message validation', () => {
 
     await waitFor(() => guests[0]!.events.length > 0, 'the valid event');
     expect(guests[0]!.events).toEqual([{ type: 'closed' }]);
-    await intruder.client.removeChannel(channel);
+    await admin.removeChannel(channel);
+  });
+});
+
+describe('private channels', () => {
+  it('keeps out players who are not seated', async () => {
+    const { room } = await setup(1);
+    const intruder = await createPlayer('Intruder');
+    for (const topic of [`room:${room.id}`, `room:${room.id}:input`]) {
+      const channel = intruder.client.channel(topic, { config: { private: true } });
+      const status = await new Promise<string>((resolve) =>
+        channel.subscribe((s) => (s === 'SUBSCRIBED' || s === 'CHANNEL_ERROR') && resolve(s)),
+      );
+      expect(status, topic).toBe('CHANNEL_ERROR');
+      await intruder.client.removeChannel(channel);
+    }
+  });
+
+  it("doesn't deliver a guest's room broadcasts", async () => {
+    const { guests } = await setup(2);
+    await guests[0]!.session.send({ type: 'closed' }).catch(() => {});
+    await delay(500);
+    expect(guests[1]!.events).toEqual([]);
+  });
+
+  it("delivers a guest's inputs to the host", async () => {
+    const { host, guests } = await setup(1);
+    const inputs: InputMessage[] = [];
+    host.session.listen({ input: (message) => inputs.push(message) });
+    guests[0]!.session.sendInput({ seat: 1, dir: 1 });
+    await waitFor(() => inputs.length > 0, 'the input');
+    expect(inputs).toEqual([{ seat: 1, dir: 1 }]);
   });
 });

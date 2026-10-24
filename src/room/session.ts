@@ -9,6 +9,14 @@
 // people connected right now, so there's no reason to write them to a table.
 // Broadcast sends them straight to the other sockets on the channel.
 //
+// Why two private channels?  Realtime Authorization checks RLS policies on
+// realtime.messages when a client joins, so only seated players get in (see
+// the private_room_channels migration).  Policies can't tell one broadcast
+// event from another, so traffic is split by who may send it:
+//   room:{id}        the host broadcasts state and events; everyone seated
+//                    receives them and tracks presence
+//   room:{id}:input  seated players send inputs; only the host acts on them
+//
 // The session lives from entering a room until returning to the lobby, so the
 // same channel carries the waiting room and the match.
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -60,6 +68,7 @@ export class RoomSession {
   private readonly client: AppClient;
   private readonly graceMs: number;
   private readonly channel: RealtimeChannel;
+  private readonly inputChannel: RealtimeChannel;
   private readonly ready: Promise<void>;
   private listener: SessionListener = {};
   private roster: RosterEntry[] = [];
@@ -86,24 +95,29 @@ export class RoomSession {
     this.graceMs = options.graceMs ?? ROOM_GRACE_MS;
 
     this.channel = this.client.channel(`room:${room.id}`, {
-      config: { presence: { key: player.id }, broadcast: { self: false } },
+      config: { private: true, presence: { key: player.id }, broadcast: { self: false } },
+    });
+    this.inputChannel = this.client.channel(`room:${room.id}:input`, {
+      config: { private: true, broadcast: { self: false } },
     });
 
     let markReady: () => void = () => {};
-    this.ready = new Promise((resolve) => (markReady = resolve));
+    let markInputReady: () => void = () => {};
+    this.ready = Promise.all([
+      new Promise<void>((resolve) => (markReady = resolve)),
+      new Promise<void>((resolve) => (markInputReady = resolve)),
+    ]).then(() => {});
 
     this.channel
       .on('presence', { event: 'sync' }, () => this.onPresenceSync())
       .on('broadcast', { event: 'event' }, (message: { payload?: unknown }) => this.onBroadcast(message.payload))
-      .on('broadcast', { event: 'input' }, (message: { payload?: unknown }) => {
-        const input = this.isHost ? parseInputMessage(message.payload) : null;
-        if (input) this.listener.input?.(input);
-      })
       .on('broadcast', { event: 'state' }, (message: { payload?: unknown }) => {
         const state = this.isHost ? null : parseStateMessage(message.payload);
         if (state) this.listener.state?.(state);
       })
       .subscribe((status) => {
+        // Refused at join: our seat is gone (or never existed).
+        if (status === 'CHANNEL_ERROR') void this.checkOwnSeat();
         if (status !== 'SUBSCRIBED') return;
         void this.channel.track({ playerId: player.id, displayName: player.displayName, seat: room.seat });
         // A second SUBSCRIBED means the socket dropped and rejoined.  The host
@@ -113,10 +127,21 @@ export class RoomSession {
         markReady();
       });
 
+    // Only the host listens on the input channel; guests join it to send.
+    if (this.isHost) {
+      this.inputChannel.on('broadcast', { event: 'input' }, (message: { payload?: unknown }) => {
+        const input = parseInputMessage(message.payload);
+        if (input) this.listener.input?.(input);
+      });
+    }
+    this.inputChannel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') markInputReady();
+    });
+
     this.timer = setInterval(() => void this.check(), options.checkIntervalMs ?? CHECK_INTERVAL_MS);
   }
 
-  /** Resolves once the channel has joined and this player is tracked. */
+  /** Resolves once both channels have joined and this player is tracked. */
   whenReady(): Promise<void> {
     return this.ready;
   }
@@ -138,7 +163,7 @@ export class RoomSession {
 
   /** Fire and forget: a lost input is fixed by the next one, a lost snapshot by the next snapshot. */
   sendInput(message: InputMessage): void {
-    void this.channel.send({ type: 'broadcast', event: 'input', payload: message });
+    void this.inputChannel.send({ type: 'broadcast', event: 'input', payload: message });
   }
 
   sendState(message: StateMessage): void {
@@ -197,12 +222,12 @@ export class RoomSession {
     else await setRoomStatus(this.client, this.room.id, 'finished');
   }
 
-  /** Stops timers and leaves the channel.  Doesn't touch the database. */
+  /** Stops timers and leaves the channels.  Doesn't touch the database. */
   async close(): Promise<void> {
     this.ended = true;
     this.listener = {};
     clearInterval(this.timer);
-    await this.client.removeChannel(this.channel);
+    await Promise.all([this.client.removeChannel(this.channel), this.client.removeChannel(this.inputChannel)]);
   }
 
   private onPresenceSync(): void {
