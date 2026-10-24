@@ -185,4 +185,4 @@ npm run check              # everything above plus typecheck; the pre-commit hoo
 npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```
 
-The `Makefile` wraps these, plus deploy targets (`make` lists them).  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.
+The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR, and deploys `main` to Cloudflare Pages only when it passes.  Migrations are still applied by hand with `make db-push`, before pushing code that needs them.  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.

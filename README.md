@@ -187,25 +187,23 @@ The backend goes to a hosted Supabase project.  The frontend is static files (`d
 make db-push   # applies new migrations to the linked project
 ```
 
-### 3. Frontend on Cloudflare Pages
+### 3. Frontend on Cloudflare Pages, deployed by CI
 
-Vite bakes `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
+Vite bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key) and `VITE_TURNSTILE_SITE_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
 
-**Option A: Cloudflare builds from Git (recommended).** In the Cloudflare dashboard, go to Workers & Pages → Create → Pages → Connect to Git, pick this repository, and set:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
 
-| Setting | Value |
-|---|---|
-| Framework preset | None (or Vite) |
-| Build command | `npm run build` |
-| Build output directory | `dist` |
-| Production branch | `main` |
-| Environment variables (Production and Preview) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key), `VITE_TURNSTILE_SITE_KEY` |
+One-time setup:
 
-Add them as plain-text variables, not secrets: secrets aren't available to the build.  If they're missing when a build runs, add them and retry the deployment.
+1. **Pages project.** Create it through Workers & Pages → Create → Pages (the Pages option may be a small link at the bottom of the Create screen) → Connect to Git, or with `make pages-create`.  If it's Git-connected, open the project's **Settings → Build → Branch control**, turn off **automatic production branch deployments**, and set preview branches to **None**.  Otherwise Pages would deploy every push itself, checks or not.
+2. **Cloudflare API token.** Under My Profile → API Tokens, create a custom token with the **Account → Cloudflare Pages → Edit** permission.  Your **account ID** is on the Workers & Pages overview.
+3. **GitHub.** In the repository's Settings → Environments, create an environment named `production` and add:
+   - secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
+   - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_TURNSTILE_SITE_KEY`.
 
-The build uses Node 24 from [`.node-version`](.node-version).  Every push to `main` deploys to production, and other branches get preview URLs.  The `prepare` script that sets up the git hook also runs during `npm install` there, which is harmless.
+The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).  It doesn't apply migrations: run `make db-push` before pushing code that needs them.
 
-**Option B: build locally and upload with Wrangler.**
+**Deploying from your machine** works too, for example if CI is down:
 
 ```sh
 # Hosted values; .env.*.local files are git-ignored.
@@ -215,12 +213,11 @@ VITE_SUPABASE_ANON_KEY=<anon key>
 VITE_TURNSTILE_SITE_KEY=<Turnstile site key>
 ENV
 
-npx wrangler@4.149.0 login                # once; or set CLOUDFLARE_API_TOKEN
-make pages-create CF_PAGES_PROJECT=<name> # once
-make deploy-web CF_PAGES_PROJECT=<name>   # build, check, upload
+npx wrangler@4.149.0 login   # once; or set CLOUDFLARE_API_TOKEN
+make deploy-web              # build, check, upload
 ```
 
-`make deploy-web` refuses to deploy if `.env.production.local` is missing or has no Turnstile site key, or if the built files still point at `127.0.0.1:54321` or use Turnstile's test key.  Without that file, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
+`make deploy-web` refuses to deploy without the hosted values (from the environment or `.env.production.local`) or without a Turnstile site key, and refuses a build that still points at `127.0.0.1:54321` or uses Turnstile's test key.  Without those values, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
 
 ### 4. After the first deploy
 

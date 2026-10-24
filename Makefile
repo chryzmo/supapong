@@ -5,7 +5,7 @@
 #   make deploy-web CF_PAGES_PROJECT=my-pong
 
 SUPABASE_PROJECT_REF ?=
-CF_PAGES_PROJECT ?= supapong
+CF_PAGES_PROJECT ?= arenapong
 CF_BRANCH ?= main
 # Run with npx on demand instead of adding it to package.json.
 WRANGLER := npx --yes wrangler@4.149.0

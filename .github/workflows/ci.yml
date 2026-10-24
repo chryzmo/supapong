@@ -1,0 +1,62 @@
+# Runs every check against a fresh local Supabase stack, then deploys the
+# frontend to Cloudflare Pages, but only from main and only if the checks
+# passed.  Pages' own automatic deploys are turned off (Branch control), so
+# this is the only way code reaches production.
+#
+# Migrations are not applied here: run `make db-push` before pushing code
+# that depends on them.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to a PR supersedes the run in progress.  Runs on main are never
+# cancelled, so a deploy can't be cut off halfway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      # Applies the migrations and seed to a fresh database.  The app doesn't
+      # use these services, so skipping them saves image pulls.
+      - run: npx supabase start -x studio,imgproxy,storage-api,edge-runtime,logflare,vector,supavisor,mailpit
+      - run: npm run check
+
+  deploy:
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      # Builds with the hosted values, refuses a build that points at the local
+      # stack or uses Turnstile's test key, then uploads dist/.
+      - run: make deploy-web
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
