@@ -17,5 +17,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  // The Edge Functions' entry points are Deno code, typechecked by Deno when
+  // deployed; their pure modules and tests are checked here.
+  "include": ["src", "tests", "vite.config.ts", "supabase/functions/*/issue.ts", "supabase/functions/*/*.test.ts"]
 }

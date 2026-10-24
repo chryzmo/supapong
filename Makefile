@@ -23,7 +23,7 @@ endif
 .DEFAULT_GOAL := help
 .PHONY: help install start stop status reset types dev build preview clean \
 	typecheck test test-db test-integration check \
-	supabase-link db-diff db-push pages-create build-prod deploy-web deploy
+	supabase-link db-diff db-push deploy-functions pages-create build-prod deploy-web deploy
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2} /^## / {printf "\n%s\n", substr($$0, 4)}' $(MAKEFILE_LIST)
@@ -94,6 +94,11 @@ db-diff: ## Show which migrations db-push would apply to the hosted project
 db-push: ## Apply new migrations to the hosted project (CI does this on main)
 	npx supabase db push $(SUPABASE_TARGET) $(if $(CI),--yes)
 
+# Bundled on Supabase's side (--use-api), so it needs no Docker.  Unlike db
+# push, functions deploy has no --linked: it uses the link by default.
+deploy-functions: ## Deploy the Edge Functions to the hosted project (CI does this on main)
+	npx supabase functions deploy --use-api $(if $(SUPABASE_PROJECT_REF),--project-ref $(SUPABASE_PROJECT_REF))
+
 pages-create: ## Create the Cloudflare Pages project (once)
 	$(WRANGLER) pages project create $(CF_PAGES_PROJECT) --production-branch $(CF_BRANCH)
 
@@ -121,4 +126,4 @@ build-prod: ## Build for the hosted project, from .env.production.local
 deploy-web: build-prod ## Build and upload dist/ to Cloudflare Pages
 	$(WRANGLER) pages deploy dist --project-name $(CF_PAGES_PROJECT) --branch $(CF_BRANCH)
 
-deploy: db-push deploy-web ## Push migrations, then deploy the frontend
+deploy: db-push deploy-functions deploy-web ## Push migrations, deploy the functions, then the frontend

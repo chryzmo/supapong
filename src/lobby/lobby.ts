@@ -10,6 +10,7 @@ import {
   type Player,
 } from '../types';
 import { errorMessage, h, type View } from '../ui';
+import { openFeedback } from '../feedback/dialog';
 import { createRoom, fetchLobbyRooms, joinRoom, subscribeLobby } from './api';
 
 export interface LobbyActions {
@@ -142,6 +143,8 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   practiceButton.addEventListener('click', () => actions.practice());
   const leaderboardButton = h('button', { className: 'secondary', type: 'button' }, 'Leaderboard');
   leaderboardButton.addEventListener('click', () => actions.leaderboard());
+  const feedbackButton = h('button', { className: 'secondary', type: 'button' }, 'Feedback');
+  feedbackButton.addEventListener('click', () => openFeedback('lobby'));
 
   const el = h(
     'div',
@@ -150,7 +153,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
       'div',
       { className: 'header' },
       h('h1', {}, `Hi, ${player.displayName}`),
-      h('div', { className: 'row' }, leaderboardButton, renameButton, signOutButton),
+      h('div', { className: 'row' }, leaderboardButton, feedbackButton, renameButton, signOutButton),
     ),
     ...(notice ? [h('p', { className: 'notice' }, notice)] : []),
     h('h2', {}, 'Open rooms'),

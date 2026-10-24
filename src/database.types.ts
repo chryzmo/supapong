@@ -23,7 +23,27 @@ export type Database = {
           }
         },"public": {
           Tables: {
-            "match_results": {
+            "feedback": {
+                  Row: {
+                    "body": string,"context": NonNullable<Json>,"created_at": string,"doing": string | null,"error": string | null,"id": string,"issue_number": number | null,"issue_url": string | null,"kind": string,"player_id": string | null,"title": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "body": string,"context"?: NonNullable<Json>,"created_at"?: string,"doing"?: string | null,"error"?: string | null,"id"?: string,"issue_number"?: number | null,"issue_url"?: string | null,"kind": string,"player_id"?: string | null,"title": string
+                  }
+                  Update: {
+                    "body"?: string,"context"?: NonNullable<Json>,"created_at"?: string,"doing"?: string | null,"error"?: string | null,"id"?: string,"issue_number"?: number | null,"issue_url"?: string | null,"kind"?: string,"player_id"?: string | null,"title"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "feedback_player_id_fkey"
+      columns: ["player_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"match_results": {
                   Row: {
                     "confirmed_by": (string)[],"finished_at": string,"id": string,"names": NonNullable<Json>,"ranked": boolean,"room_id": string | null,"room_name": string | null,"scores": NonNullable<Json>
                   }

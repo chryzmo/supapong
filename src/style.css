@@ -136,7 +136,8 @@ form.create label.check {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   padding: 10px 12px;
   border-radius: 8px;
@@ -419,4 +420,34 @@ label.check {
   .stage-main.touch > :not(canvas, .touch-controls) {
     grid-column: 1 / -1;
   }
+}
+
+/* Feedback: a modal over the current screen. */
+dialog.feedback {
+  margin: auto;
+  max-height: calc(100dvh - 32px);
+  width: calc(100% - 32px);
+  overflow: auto;
+  color: var(--text);
+}
+
+dialog.feedback::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+
+.feedback-form {
+  display: grid;
+  gap: 12px;
+}
+
+.feedback-form textarea {
+  resize: vertical;
+}
+
+.feedback-form .kind {
+  gap: 16px;
+}
+
+.feedback-form .kind label.check {
+  padding-bottom: 0;
 }

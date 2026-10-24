@@ -31,21 +31,25 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      # Applies the migrations and seed to a fresh database.  The app doesn't
-      # use these services, so skipping them saves image pulls.
-      - run: npx supabase start -x studio,imgproxy,storage-api,edge-runtime,logflare,vector,supavisor,mailpit
+      # Applies the migrations and seed to a fresh database, and serves the
+      # Edge Functions.  The app doesn't use these services, so skipping them
+      # saves image pulls.
+      - run: npx supabase start -x studio,imgproxy,storage-api,logflare,vector,supavisor,mailpit
       - run: npm run check
 
-  # Applies new migrations to the hosted database, as its own job so it shows
-  # up on its own in the run and a failed deploy can be re-run without it.
-  # It runs before deploy, so the new frontend never calls tables or
-  # functions that aren't there yet.  The old frontend stays live meanwhile
+  # Applies new migrations to the hosted database and deploys the Edge
+  # Functions, as its own job so it shows up on its own in the run and a
+  # failed deploy can be re-run without it.  It runs before deploy, so the new
+  # frontend never calls tables or functions that aren't there yet.  The
+  # functions go after the migrations, since they use the tables.  The old frontend stays live meanwhile
   # (and if the deploy fails), so every migration has to work with it too.
   #
   # GitHub's runners have no IPv6 and the database's direct host is
   # IPv6-only, so the CLI looks up the IPv4 pooler.  The token needs Database
   # read-write (for the CLI's temporary login role) and Connection Pooling
-  # read.
+  # read.  Deploying functions needs Edge Functions read-write as well.  The
+  # functions' secrets (GITHUB_TOKEN) are set once with `supabase secrets set`,
+  # not here.
   migrate:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -62,6 +66,11 @@ jobs:
       - run: npm ci
       - name: Apply new migrations to the hosted database
         run: make db-push
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      - name: Deploy the Edge Functions
+        run: make deploy-functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}

@@ -82,6 +82,18 @@ result_confirmations (        -- what each guest was shown; private
   created_at timestamptz default now(),
   primary key (room_id, player_id)
 )
+
+feedback (                    -- bug reports and feature requests, filed as GitHub issues
+  id uuid primary key default gen_random_uuid(),
+  player_id uuid default auth.uid() references profiles on delete set null,  -- a profile is required to send
+  kind text not null check (kind in ('bug','feature')),
+  title text not null,        -- 3 to 80 characters
+  body text not null,         -- up to 2000
+  doing text,                 -- bugs, optional: what they were doing; up to 1000
+  context jsonb not null default '{}',  -- version, screen, browser...
+  issue_number int, issue_url text, error text,  -- set by the create-issue function
+  created_at timestamptz not null default now()
+)
 ```
 
 - Put a view or RPC called `lobby_rooms` on top of these.  It returns rooms where `status = 'waiting'` along with `player_count`, `max_players`, `goal_limit`, `power_ups` and `match_seconds`, so the lobby can show "x/y", what ends the match, and the mode.
@@ -105,6 +117,17 @@ result_confirmations (        -- what each guest was shown; private
   - **Broadcast `input`** (guest → host, on `room:{id}:input:{player_id}`): `{ seat, dir: -1 | 0 | 1, paddle, save? }`.  The host ignores `seat` and uses the topic's player.  Send it when the direction changes, and every 200 ms while moving (`RESEND_MS`), never while still.  `paddle` is where the player has their paddle on screen.  Only the host acts on it: it adopts the position (kept inside the gate), so its copy doesn't overshoot after a key is released.  It moves the paddle at most 0.25 s of travel at once beyond what the inputs did, with that allowance coming back at half a second per second (`ADOPT_BURST_SECONDS`), so a modified client can't teleport its paddle.
   - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, balls: [x, y, vx, vy, touch, rally][], paddles[], active[], scores[], goals, seed, respawn }` (`touch` is the last gate to hit that ball, or -1; `seed` is the host's PRNG state), arrays in gate order, numbers rounded to 4 decimals (under 300 bytes at 8 players).  With power-ups, it also carries `pickup: [kind, x, y, ticksLeft]` (kind indexes `PICKUP_KINDS`), `timer` (ticks to the timer's next token), and per-gate `wide[]` and `shield[]` ticks, each left out when there's nothing to say (under 500 bytes at 8 players with three balls).  Between snapshots, guests take only paddle positions from them and let the replay work out the effects, so a shield that breaks in between stays up until the ball reaches it.  `balls` is never empty: while waiting to launch it holds one ball resting at the center.  Guests still read the single `ball` with `touch` and `rally` alongside that a host on protocol 1 sends.
   - **Broadcast `event`** (host → all): `start` (carries the gate order, `gates: { seat, playerId, displayName, bot? }[]`, the room's `goalLimit` and `matchSeconds` (each null for no limit; 10 and 120 if missing), `powerUps` (false if missing), and `protocol`: the oldest `PROTOCOL_VERSION` that can play this match (`matchProtocol` in `types.ts`: 4 with a length other than 2 minutes or no goal limit, otherwise 3 with power-ups and 2 without; 1 if missing).  `settings` (`{ goalLimit, matchSeconds, powerUps }`) tells the waiting room when the host changes them.  A guest whose code is older leaves with a "reload" notice, so a stale tab can still play a classic match), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate, scorer? }`, for the flash; `scorer` is left out when nobody got the point) and `end` (`{ scores }`).
+
+- `feedback`: players can insert their own rows (not the issue columns) and read only their own; no updates.  A trigger allows 5 per player per 24 hours.  The function writes the issue columns with the service role.
+
+### Edge Functions
+
+- **`create-issue`** (`supabase/functions/create-issue/`) files feedback as a GitHub issue.  The token can't be in the browser, so the function holds it (the `GITHUB_TOKEN` secret; `GITHUB_REPO` optionally names the repo, default `chryzmo/supapong`).  The app calls it with `supabase.functions.invoke` (`src/feedback/api.ts`).
+  - **Saving first:** it checks the input (`parseFeedback` in `issue.ts`, shared with the dialog), then inserts into `feedback` with the caller's own JWT.  So RLS, the daily cap and the profile requirement apply exactly as to any client.
+  - **Then GitHub:** it files the issue (`buildIssue`), and records the number and link, or the error, with the service role.  Without `GITHUB_TOKEN` (locally) it saves and stops, so tests never file real issues.
+  - **Safe on a public repo:** the player's words go in code fences longer than any run of backticks inside, so their markdown, links, images and @mentions show as plain text.  @ and # in the title are broken with a zero-width space.  The issue names the player by display name, never by id.
+  - `issue.ts` is pure (no Deno or npm imports), so Vitest tests it and the app imports it; `index.ts` is the Deno entry point, outside `tsc`.
+  - Deployed by CI after the migrations (`make deploy-functions`).
 
 ### Cleanup
 
@@ -151,6 +174,7 @@ result_confirmations (        -- what each guest was shown; private
 - **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  The ball takes the color of the last paddle to touch it, the player who'd score, and is white before anyone has.  A gate flashes when it concedes, and the scorer's paddle glows.  Names (cut to 10 characters) and scores sit outside the rim, upright.
 - **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.  On a mobile browser (`isMobileBrowser` in `touch.ts`: Client Hints, then the user agent including iPads posing as Macs, then a touch-only primary pointer), two hold-to-move buttons, ◀ and ▶, sit under the board, or either side of it on a phone held sideways.  They hold pseudo-keys in the same `PaddleInput` as the keyboard.  Spectators get none.  `?touch=1` or `?touch=0` forces them on or off.
 - **Leaderboard:** the lobby's Leaderboard button opens the top 10 players (plus your own row if you're further down) and the 10 latest matches, with an All / Mine toggle.  Matches too few players confirmed are tagged "unconfirmed" and left out of the standings.
+- **Feedback:** the lobby's Feedback button and the results screen's Send feedback open a dialog (`src/feedback/dialog.ts`, a `<dialog>`): Bug or Feature request, a title, a description, and for bugs an optional "what were you doing?".  It says the feedback becomes a public GitHub issue under the player's display name.  It attaches the build's commit (`__APP_VERSION__`, defined in `vite.config.ts`), which screen it came from, the window size, whether it's a mobile browser, and the user agent.
 - **Practice:** the sandbox is at `/#sandbox` (no sign-in needed) and behind the lobby's Practice button.  Its "Copy config" button copies the tuned physics settings as JSON for pasting into `DEFAULT_CONFIG`.
 
 ## Project layout
@@ -163,6 +187,7 @@ src/
   captcha.ts         Turnstile widget, loaded from Cloudflare on demand
   lobby/             lobby screen, room list, create room
   stats/             leaderboard and match history screen
+  feedback/          feedback dialog, and the call to the create-issue function
   room/              channel wiring (presence, broadcast send/receive), waiting room, match and results screens, lineup.ts (bots), standings.ts
   game/
     physics.ts       pure functions, no DOM or network; unit tested
@@ -183,6 +208,7 @@ src/
   database.types.ts  generated by `npm run gen:types`; don't edit
 supabase/
   migrations/        schema, RLS, RPCs
+  functions/         Edge Functions (Deno): create-issue
   tests/database/    pgTAP
   seed.sql
 tests/integration/   app modules against the local stack
@@ -231,4 +257,4 @@ npm run check              # everything above plus typecheck; the pre-commit hoo
 npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```
 
-The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR.  On `main`, when it passes, a `migrate` job applies new migrations to the hosted database (`make db-push`), and then a `deploy` job deploys to Cloudflare Pages.  If a migration fails, nothing is deployed.  CI builds with the hosted values from the GitHub `production` environment; deploying from your machine reads them from `.env.production.local`.  Either way, `make build-prod` refuses a build that still points at the local stack.
+The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR.  On `main`, when it passes, a `migrate` job applies new migrations to the hosted database (`make db-push`) and deploys the Edge Functions (`make deploy-functions`), and then a `deploy` job deploys to Cloudflare Pages.  If a migration fails, nothing is deployed.  CI builds with the hosted values from the GitHub `production` environment; deploying from your machine reads them from `.env.production.local`.  Either way, `make build-prod` refuses a build that still points at the local stack.

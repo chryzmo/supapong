@@ -94,11 +94,13 @@ sequenceDiagram
 | Game traffic: inputs, snapshots, room events | **Realtime Broadcast** | These only matter to people connected right now, so writing them to a table would be wasted work.  Broadcast sends them straight to the other sockets on the channel. | same, and [`src/game/`](src/game/) |
 | Only seated players in a room's channels, only the host sends game state | **Realtime Authorization** (private channels) | RLS policies on `realtime.messages` are checked when a client joins, against the same `room_players` and `rooms` tables as everything else.  Policies can tell broadcast from presence but not one event from another, so traffic is split by sender: on `room:{id}` only the host may broadcast, and each player sends inputs on their own `room:{id}:input:{player_id}`, which only they and the host can join.  A message doesn't say who sent it, but the topic does, so a guest can't send inputs for someone else's seat.  The lobby channel is private too (read only), so the project refuses public channels altogether. | [`private_room_channels.sql`](supabase/migrations/20261024020243_private_room_channels.sql) |
 | Tidy up without a server | **pg_cron** | Abandoned rooms and throwaway anonymous users would otherwise pile up, since in-game cleanup depends on a host's browser.  A scheduled SQL function inside Postgres runs every 15 minutes: rooms older than 2 hours go (seats with them, results stay), and so do anonymous users idle for 7 days.  No Edge Function, no external scheduler. | [`cleanup_job.sql`](supabase/migrations/20261024022239_cleanup_job.sql) |
+| Feedback filed as GitHub issues, without putting a token in the browser | **Edge Function** `create-issue` | Filing an issue needs a GitHub token, and anything in the bundle can be read by anyone.  The function holds the token as a secret and does one thing with it.  It saves the feedback first with the player's own JWT, so the `feedback` table's RLS and daily cap apply as to any client, then files the issue and records the link with the service role.  The browser calls it with `supabase.functions.invoke`. | [`supabase/functions/create-issue/`](supabase/functions/create-issue/) |
 | Schema you can review, reproduce and test | **Supabase CLI**: migrations, local stack, `supabase test db` (pgTAP), `gen types` | Every schema change is a migration file.  The local stack runs the same Postgres, Auth and Realtime as production.  RLS and RPCs have SQL tests, and `src/database.types.ts` is generated, so queries are type-checked. | [`supabase/`](supabase/) |
 
 Deliberately not used yet:
-- **Edge Functions:** nothing needs server-side code, because the host's browser runs the game.
 - **Storage:** there are no files.
+
+Edge Functions do one job here, feedback.  The game itself needs no server-side code, because the host's browser runs it.
 
 ## Netcode
 
@@ -209,7 +211,7 @@ make db-push   # applies them to the linked project
 
 Vite bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key) and `VITE_TURNSTILE_SITE_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, a `migrate` job runs `make db-push` to apply new migrations to the hosted database.  Then a `deploy` job runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  If a migration fails, nothing is deployed, and a failed deploy can be re-run on its own.  Runs on `main` queue rather than overlap, so two pushes never apply migrations at once.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, a `migrate` job runs `make db-push` to apply new migrations to the hosted database, then `make deploy-functions` to deploy the Edge Functions.  Then a `deploy` job runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  If a migration fails, nothing is deployed, and a failed deploy can be re-run on its own.  Runs on `main` queue rather than overlap, so two pushes never apply migrations at once.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
 
 One-time setup:
 
@@ -217,7 +219,7 @@ One-time setup:
 2. **Cloudflare API token.** Under My Profile → API Tokens, create a custom token with the **Account → Cloudflare Pages → Edit** permission.  Your **account ID** is on the Workers & Pages overview.
 3. **GitHub.** In the repository's Settings → Environments, create an environment named `production` and add:
    - secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
-   - secret `SUPABASE_ACCESS_TOKEN`, for applying migrations: a scoped Supabase access token (Account → Access Tokens) with **Database: read-write** (`database_write`, which the CLI needs to create its temporary login role) and **Connection Pooling: read** (`database_pooling_config_read`).  GitHub's runners have no IPv6 and the database's direct host is IPv6-only, so the CLI has to look up the IPv4 pooler.  Without that permission it fails with "IPv6 is not supported on your current network".  The Migrations permission isn't needed: the CLI applies migrations over the database connection;
+   - secret `SUPABASE_ACCESS_TOKEN`, for applying migrations and deploying functions: a scoped Supabase access token (Account → Access Tokens) with **Database: read-write** (`database_write`, which the CLI needs to create its temporary login role), **Connection Pooling: read** (`database_pooling_config_read`), and **Edge Functions: read-write**.  GitHub's runners have no IPv6 and the database's direct host is IPv6-only, so the CLI has to look up the IPv4 pooler.  Without that permission it fails with "IPv6 is not supported on your current network".  The Migrations permission isn't needed: the CLI applies migrations over the database connection;
    - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TURNSTILE_SITE_KEY` and `SUPABASE_PROJECT_REF`.
 
 The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).
@@ -236,9 +238,21 @@ npx wrangler@4.149.0 login   # once; or set CLOUDFLARE_API_TOKEN
 make deploy-web              # build, check, upload
 ```
 
-`make deploy-web` refuses to deploy without the hosted values (from the environment or `.env.production.local`) or without a Turnstile site key, and refuses a build that still points at `127.0.0.1:54321` or uses Turnstile's test key.  Without those values, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
+`make deploy-web` refuses to deploy without the hosted values (from the environment or `.env.production.local`) or without a Turnstile site key, and refuses a build that still points at `127.0.0.1:54321` or uses Turnstile's test key.  Without those values, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push`, `deploy-functions`, then `deploy-web`.
 
-### 4. After the first deploy
+### 4. Feedback to GitHub (once)
+
+The `create-issue` function files feedback on the repo named by `GITHUB_REPO` (default `chryzmo/supapong`).  Give it a fine-grained GitHub token limited to that repo, with only **Issues: read and write**:
+
+```sh
+npx supabase secrets set GITHUB_TOKEN=<token> --project-ref <ref>
+# Optional, for a different repo:
+npx supabase secrets set GITHUB_REPO=<owner>/<repo> --project-ref <ref>
+```
+
+Locally there's no token, so feedback is saved but never filed.  On Fedora with rootless Podman, the local Edge Functions runtime can't read `supabase/functions` until it's labeled for containers: `chcon -R -t container_file_t supabase/functions`, then restart the stack.
+
+### 5. After the first deploy
 
 - **Site URL:** set the Pages URL (for example `https://<name>.pages.dev`) as the **Site URL** in Supabase's Auth URL configuration.  Anonymous sign-in doesn't redirect, so nothing breaks without it today, but email or OAuth sign-in will need it.
 - **Routing:** none needed.  The app only uses `/` and `/#sandbox`, so Pages needs no single-page-app fallback rules.
@@ -253,11 +267,13 @@ src/
   supabase.ts, auth.ts client and anonymous sign-in
   lobby/               room list, create/join (Postgres Changes)
   stats/               leaderboard and match history
+  feedback/            the feedback dialog, which calls the create-issue function
   room/                RoomSession (Presence + Broadcast), waiting room, match and results screens
   game/                physics, host, client, snapshots, renderer, sandbox
   types.ts             shared types and message parsers
 supabase/
   migrations/          schema, RLS, RPCs
+  functions/           Edge Functions: create-issue files feedback as GitHub issues
   tests/database/      pgTAP
 tests/integration/     app modules against the local stack
 scripts/check.sh       what `npm run check` and the pre-commit hook run

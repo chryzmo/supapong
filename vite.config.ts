@@ -1,6 +1,20 @@
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
 
+/** The commit being built, for feedback reports: CI's, or the local checkout's. */
+function appVersion(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    return 'dev';
+  }
+}
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion()),
+  },
   server: {
     // Match auth.site_url in supabase/config.toml.
     host: '127.0.0.1',
@@ -13,7 +27,8 @@ export default defineConfig({
         // Pure code: no network, no DOM.  `npm test`
         test: {
           name: 'unit',
-          include: ['src/**/*.test.ts'],
+          // Plus the Edge Functions' pure modules, tested alongside them.
+          include: ['src/**/*.test.ts', 'supabase/functions/**/*.test.ts'],
         },
       },
       {

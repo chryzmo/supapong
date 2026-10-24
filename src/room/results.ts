@@ -1,3 +1,4 @@
+import { openFeedback } from '../feedback/dialog';
 import { SEAT_COLORS } from '../game/render';
 import { errorMessage, h, type View } from '../ui';
 import { headline, standings, type MatchResult } from './standings';
@@ -59,6 +60,8 @@ export function resultsScreen(result: MatchResult, options: ResultsOptions): Vie
 
   const back = h('button', { type: 'button' }, 'Back to lobby');
   back.addEventListener('click', () => options.back());
+  const feedback = h('button', { type: 'button', className: 'secondary' }, 'Send feedback');
+  feedback.addEventListener('click', () => openFeedback('results'));
 
   return {
     el: h(
@@ -68,7 +71,7 @@ export function resultsScreen(result: MatchResult, options: ResultsOptions): Vie
       h('h1', {}, headline(rows)),
       list,
       status,
-      h('div', { className: 'row' }, back, retry),
+      h('div', { className: 'row' }, back, retry, feedback),
     ),
     dispose() {
       disposed = true;
