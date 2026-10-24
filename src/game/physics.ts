@@ -133,7 +133,9 @@ export interface GateState {
   shieldTicks?: number;
 }
 
-export type PickupKind = 'wide' | 'shield' | 'multiball';
+/** In this order, so a snapshot can send a kind as its index. */
+export const PICKUP_KINDS = ['wide', 'shield', 'multiball'] as const;
+export type PickupKind = (typeof PICKUP_KINDS)[number];
 
 /** A token on the board, waiting for a ball someone has touched to pass through it. */
 export interface Pickup {
@@ -623,7 +625,7 @@ function jitterBounce(vx: number, vy: number, nx: number, ny: number, angle: num
  * Bounces off a paddle at contact point (px, py).
  * @param offset Where the ball hit, from -1 (clockwise end) to +1 (counterclockwise end).
  */
-function paddleBounce(px: number, py: number, vx: number, vy: number, offset: number, config: PhysicsConfig): [number, number] {
+export function paddleBounce(px: number, py: number, vx: number, vy: number, offset: number, config: PhysicsConfig): [number, number] {
   const len = Math.hypot(px, py);
   const nx = px / len; // Outward normal.
   const ny = py / len;

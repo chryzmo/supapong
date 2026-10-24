@@ -27,6 +27,7 @@ import {
   createGame,
   gateHalfWidth,
   movePaddle,
+  paddleWidth,
   setGateActive,
   step,
   type Dir,
@@ -172,7 +173,8 @@ export class HostGame {
     allowance.tick = this.ticksRun;
     const speed = this.config.paddleSpeed * 2 * gateHalfWidth(n, this.config);
     const current = this.state.gates[gate]!.paddle;
-    const wanted = angleDiff(movePaddle(paddle, gate, n, 0, 0, this.config), current);
+    const width = paddleWidth(this.state.gates[gate]!, this.config);
+    const wanted = angleDiff(movePaddle(paddle, gate, n, 0, 0, this.config, width), current);
     const most = allowance.budget * speed;
     const moved = Math.max(-most, Math.min(most, wanted));
     allowance.budget -= Math.abs(moved) / speed;
@@ -199,7 +201,7 @@ export class HostGame {
     const n = this.gates.length;
     const slack = this.config.paddleSpeed * 2 * gateHalfWidth(n, this.config) * CLAIM_SLACK_SECONDS;
     if (Math.abs(angleDiff(paddle, replayed[0]!.before.gates[gate]!.paddle)) > slack) return false;
-    const placed = movePaddle(paddle, gate, n, 0, 0, this.config);
+    const placed = movePaddle(paddle, gate, n, 0, 0, this.config, paddleWidth(replayed[0]!.before.gates[gate]!, this.config));
 
     // Replay with the guest's paddle where they had it for the claimed tick
     // and the next (the crossing can fall either side of a tick boundary).

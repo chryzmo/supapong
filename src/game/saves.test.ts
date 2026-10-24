@@ -46,6 +46,13 @@ describe('detectSave', () => {
     expect(claim?.tick).toBeCloseTo(100.5, 6);
   });
 
+  it('reaches as far as a wide paddle does', () => {
+    const off = paddleReach(n, config) + 0.01;
+    const [prev, next] = frames(gate + off);
+    expect(detectSave(prev, next, n, config)).toBeNull();
+    expect(detectSave({ ...prev, width: 1.6 }, { ...next, width: 1.6 }, n, config)).not.toBeNull();
+  });
+
   it("doesn't claim when the paddle doesn't cover the spot", () => {
     const off = paddleReach(n, config) + 0.01;
     expect(detectSave(...frames(gate + off), n, config)).toBeNull();

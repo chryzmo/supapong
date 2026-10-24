@@ -18,7 +18,7 @@ const FLASH_MS = 600;
 const RESULTS_DELAY_MS = 1500;
 export function matchScreen(session: RoomSession, start: MatchStart, actions: RoomActions): View {
   const { gates } = start;
-  const config = { ...DEFAULT_CONFIG, goalLimit: start.goalLimit };
+  const config = { ...DEFAULT_CONFIG, goalLimit: start.goalLimit, powerUps: start.powerUps };
   const { room, player, isHost } = session;
   const myGate = gates.findIndex((gate) => gate.playerId === player.id);
   const labels = gates.map((gate, i) => ({ name: gate.displayName, color: SEAT_COLORS[i % SEAT_COLORS.length]! }));
@@ -78,7 +78,14 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     draw(canvas, state, config, renderView(state, now));
     const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
     const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-    hud.textContent = finalScores ? 'Final score' : `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${Math.max(...state.balls.map((b) => b.rally))}`;
+    const mine = state.gates[myGate];
+    const effects = [
+      ...(mine?.wideTicks ? [`wide ${Math.ceil(mine.wideTicks / TICK_RATE)}s`] : []),
+      ...(mine?.shieldTicks ? [`shield ${Math.ceil(mine.shieldTicks / TICK_RATE)}s`] : []),
+    ];
+    hud.textContent = finalScores
+      ? 'Final score'
+      : [`${time} left`, `${state.goals}/${config.goalLimit} goals`, `rally ${Math.max(...state.balls.map((b) => b.rally))}`, ...effects].join(' · ');
   });
 
   function renderView(state: GameState, now: number): RenderView {

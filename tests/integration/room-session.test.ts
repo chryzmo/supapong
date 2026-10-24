@@ -3,7 +3,7 @@
 // they would in their own browser tab.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomSession, type SessionListener } from '../../src/room/session';
-import { PROTOCOL_VERSION, type InputMessage, type RoomEvent, type RosterEntry, type SeatedRoom } from '../../src/types';
+import { matchProtocol, type InputMessage, type RoomEvent, type RosterEntry, type SeatedRoom } from '../../src/types';
 import { admin, createPlayer, delay, waitFor, type TestPlayer } from './helpers';
 
 // RoomSession imports the app client module; the tests always pass a client explicitly.
@@ -45,10 +45,10 @@ async function openSeat(player: TestPlayer, room: SeatedRoom): Promise<Seat> {
   return seat;
 }
 
-async function createRoom(host: TestPlayer, maxPlayers = 4): Promise<SeatedRoom> {
-  const { data, error } = await host.client.rpc('create_room', { p_name: 'Session test', p_max_players: maxPlayers });
+async function createRoom(host: TestPlayer, maxPlayers = 4, powerUps = true): Promise<SeatedRoom> {
+  const { data, error } = await host.client.rpc('create_room', { p_name: 'Session test', p_max_players: maxPlayers, p_power_ups: powerUps });
   if (error) throw error;
-  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, goalLimit: 10, seat: 0 };
+  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, goalLimit: 10, powerUps, seat: 0 };
 }
 
 async function join(player: TestPlayer, room: SeatedRoom): Promise<SeatedRoom> {
@@ -70,10 +70,10 @@ async function roomStatus(roomId: string): Promise<string | undefined> {
 const ids = (roster: RosterEntry[]) => roster.map((entry) => entry.playerId);
 
 /** Host plus `guests` connected guests, all in one room. */
-async function setup(guests: number) {
+async function setup(guests: number, powerUps = true) {
   const players = await Promise.all([createPlayer('Host'), ...Array.from({ length: guests }, (_, i) => createPlayer(`Guest ${i + 1}`))]);
   const [hostPlayer, ...guestPlayers] = players as [TestPlayer, ...TestPlayer[]];
-  const room = await createRoom(hostPlayer);
+  const room = await createRoom(hostPlayer, 4, powerUps);
   const host = await openSeat(hostPlayer, room);
   const seated: Seat[] = [];
   for (const guest of guestPlayers) seated.push(await openSeat(guest, await join(guest, room)));
@@ -189,8 +189,16 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, protocol: PROTOCOL_VERSION }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, protocol: matchProtocol(true), powerUps: true }]);
     }
+  });
+
+  it("tells guests a classic room's match has no power-ups, and that older code can play it", async () => {
+    const { host, guests } = await setup(1, false);
+    const start = await host.session.startMatch();
+    expect(start).toMatchObject({ powerUps: false, protocol: 2 });
+    await waitFor(() => guests[0]!.events.length > 0, 'the start event');
+    expect(guests[0]!.events[0]).toMatchObject({ type: 'start', powerUps: false, protocol: 2 });
   });
 
   it('adds bots in the free seats, without giving them seats in the database', async () => {
@@ -204,7 +212,7 @@ describe('startMatch', () => {
     ]);
     expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, protocol: PROTOCOL_VERSION }]);
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, protocol: matchProtocol(true), powerUps: true }]);
   });
 
   it('adds bots past the room size, up to 8 gates', async () => {

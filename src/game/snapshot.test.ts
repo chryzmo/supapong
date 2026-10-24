@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseStateMessage } from '../types';
+import { botInput } from './bot';
+import { interpolate } from './interpolate';
 import { DEFAULT_CONFIG, DT, createGame, step, type Dir, type GameState } from './physics';
 import { INTERP_DELAY_MS, MAX_EXTRAPOLATE_TICKS, SnapshotBuffer, decodeState, encodeState } from './snapshot';
 
@@ -29,6 +31,40 @@ describe('encodeState / decodeState', () => {
     expect(back.balls[0]!.x).toBeCloseTo(state.balls[0]!.x, 4);
     expect(back.gates.map((g) => g.paddle)).toEqual(state.gates.map((g) => expect.closeTo(g.paddle, 4) as number));
     expect(back.gates.map((g) => g.active)).toEqual([true, true, true]);
+  });
+
+  it('carries power-ups: the token, the timer, and each gate\'s effects', () => {
+    const state: GameState = {
+      ...playing(10).at(-1)!,
+      pickup: { kind: 'multiball', x: 0.31234567, y: -0.4, ticksLeft: 200 },
+      pickupTimer: 77,
+      gates: playing(10).at(-1)!.gates.map((g, i) => (i === 1 ? { ...g, wideTicks: 90, shieldTicks: 5 } : g)),
+    };
+    const back = decodeState(parseStateMessage(JSON.parse(JSON.stringify(encodeState(state))))!);
+    expect(back.pickup).toEqual({ kind: 'multiball', x: 0.3123, y: -0.4, ticksLeft: 200 });
+    expect(back.pickupTimer).toBe(77);
+    expect(back.gates.map((g) => [g.wideTicks, g.shieldTicks])).toEqual([[undefined, undefined], [90, 5], [undefined, undefined]]);
+  });
+
+  it('leaves the power-up fields out of a classic match', () => {
+    expect(Object.keys(encodeState(playing(10).at(-1)!)).sort()).toEqual(['active', 'balls', 'goals', 'paddles', 'respawn', 'scores', 'seed', 'tick']);
+  });
+
+  it('stays small with power-ups at their busiest', () => {
+    const ball = { x: -0.123456, y: 0.654321, vx: -1.234567, vy: 2.345678, lastTouch: 7, rally: 12 };
+    const json = JSON.stringify(
+      encodeState({
+        ...playing(10).at(-1)!,
+        gates: Array(8).fill({ active: true, paddle: -2.123456789, wideTicks: 480, shieldTicks: 900 }),
+        scores: Array(8).fill(10),
+        goals: 25,
+        balls: [ball, ball, ball],
+        pickup: { kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 600 },
+        pickupTimer: 720,
+        seed: 4294967295,
+      }),
+    );
+    expect(json.length).toBeLessThan(500);
   });
 
   it('stays small', () => {
@@ -87,6 +123,58 @@ describe('SnapshotBuffer', () => {
     // Within rounding of the host (measured: 0.0001).  A straight line
     // between snapshots is off by 0.1 here, cutting the corner at each bounce.
     expect(worst).toBeLessThan(0.001);
+  });
+
+  it('replays power-ups the way the host played them: tokens, wide paddles, shields and multiball', () => {
+    // Tokens often, and long shields, so a short game has every effect in it.
+    const config = { ...DEFAULT_CONFIG, powerUps: true, pickupMinSeconds: 2, pickupMaxSeconds: 3, pickupVolley: 3, shieldDuration: 30, goalLimit: 1000 };
+    const host: GameState[] = [];
+    const seen = new Set<string>();
+    let state = createGame(4, 5, config);
+    for (let i = 0; i < 60 * 90; i++) {
+      const result = step(state, state.gates.map((_, g) => botInput(state, g, config, 0.9)), config);
+      state = result.state;
+      result.events.forEach((e) => seen.add(e.type === 'pickup' ? `pickup:${e.kind}` : e.type));
+      host.push(state);
+    }
+    // The game had every effect in it, or the test proves little.
+    expect([...seen]).toEqual(expect.arrayContaining(['spawn', 'pickup:wide', 'pickup:shield', 'pickup:multiball', 'shield']));
+
+    const buffer = new SnapshotBuffer(config);
+    const wire = (s: GameState) => decodeState(parseStateMessage(JSON.parse(JSON.stringify(encodeState(s))))!);
+    const snapshots = host.filter((s) => s.tick % 3 === 0);
+    let next = 0;
+    let worst = 0;
+    let off = 0;
+    let drawnBalls = 0;
+    for (const s of host.filter((s) => s.tick > 3 && s.tick < host.length - 10)) {
+      const drawAt = arrival(s) + INTERP_DELAY_MS;
+      while (next < snapshots.length && arrival(snapshots[next]!) <= drawAt) buffer.push(wire(snapshots[next]!), arrival(snapshots[next++]!));
+      // What the host had at the moment drawn: its own two ticks either side,
+      // blended the same way.  (The drawing clock settles over the first few
+      // ticks, so the moment isn't always exactly s.)
+      const at = buffer.renderTick(drawAt)!;
+      const drawn = buffer.sample(drawAt)!;
+      const tick = Math.floor(at);
+      const truth = interpolate(host[tick - 1]!, host[tick]!, at - tick);
+      expect(drawn.balls.length).toBe(truth.balls.length);
+      drawn.balls.forEach((b, i) => {
+        const d = Math.hypot(b.x - truth.balls[i]!.x, b.y - truth.balls[i]!.y);
+        worst = Math.max(worst, d);
+        drawnBalls++;
+        if (d > 0.01) off++;
+      });
+      expect(drawn.pickup?.kind).toBe(truth.pickup?.kind);
+      expect(drawn.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0])).toEqual(truth.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0]));
+    }
+    // The replay blends paddles between snapshots, so a ball that only just
+    // caught a paddle's edge on the host can slip past it in the replay, for
+    // a frame or two until the next snapshot.  Hard bots aiming for tokens
+    // hit near the edge a lot.  Measured: one drawn ball in about 7,000 off by
+    // more than 0.01 (by 0.039).  Otherwise within 0.004, the same as without
+    // power-ups.
+    expect(off / drawnBalls).toBeLessThan(0.001);
+    expect(worst).toBeLessThan(0.05);
   });
 
   it('runs the physics on when the next snapshot is late, for at most MAX_EXTRAPOLATE_TICKS', () => {

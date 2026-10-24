@@ -28,7 +28,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, type AppClient } from '../supabase';
 import {
   MIN_PLAYERS,
-  PROTOCOL_VERSION,
+  matchProtocol,
   parseInputMessage,
   parseRoomEvent,
   parseStateMessage,
@@ -225,8 +225,10 @@ export class RoomSession {
     this.phase = 'playing';
     // Before `start`, so the first inputs, sent once guests hear it, aren't lost.
     await this.listenForInputs(humans.filter((gate) => gate.playerId !== this.player.id));
-    await this.send({ type: 'start', gates, goalLimit: this.room.goalLimit, protocol: PROTOCOL_VERSION });
-    return { gates, goalLimit: this.room.goalLimit, protocol: PROTOCOL_VERSION, ...(options.botSkill !== undefined ? { botSkill: options.botSkill } : {}) };
+    const { goalLimit, powerUps } = this.room;
+    const protocol = matchProtocol(powerUps);
+    await this.send({ type: 'start', gates, goalLimit, protocol, powerUps });
+    return { gates, goalLimit, protocol, powerUps, ...(options.botSkill !== undefined ? { botSkill: options.botSkill } : {}) };
   }
 
   /**

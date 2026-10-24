@@ -2,7 +2,7 @@
 // slightly in the past so motion is smooth, and predicts its own paddle so
 // keys feel instant.
 import type { Gate, StateMessage } from '../types';
-import { DEFAULT_CONFIG, angleDiff, createGame, movePaddle, type Dir, type GameState, type PhysicsConfig } from './physics';
+import { DEFAULT_CONFIG, angleDiff, createGame, movePaddle, paddleWidth, type Dir, type GameState, type PhysicsConfig } from './physics';
 import { detectSave, type DrawnFrame, type SaveClaim } from './saves';
 import { SnapshotBuffer, decodeState } from './snapshot';
 
@@ -94,7 +94,9 @@ export class ClientGame {
   private advanceOwnPaddle(now: number): void {
     const dt = this.lastViewAt === undefined ? 0 : Math.min((now - this.lastViewAt) / 1000, 0.1);
     this.lastViewAt = now;
-    this.ownPaddle = movePaddle(this.ownPaddle, this.myGate, this.gates.length, this.ownDir, dt, this.config);
+    const own = this.buffer.latest()?.gates[this.myGate];
+    const width = own ? paddleWidth(own, this.config) : 1;
+    this.ownPaddle = movePaddle(this.ownPaddle, this.myGate, this.gates.length, this.ownDir, dt, this.config, width);
   }
 
   /**
@@ -128,7 +130,9 @@ export class ClientGame {
   /** Claims a save if, since the last frame, our screen showed one the host's ball doesn't. */
   private checkForSave(state: GameState, tick: number | undefined): void {
     if (tick === undefined) return;
-    const frame: DrawnFrame = { tick, balls: state.balls, respawnTicks: state.respawnTicks, paddle: this.ownPaddle };
+    const own = state.gates[this.myGate];
+    const width = own ? paddleWidth(own, this.config) : 1;
+    const frame: DrawnFrame = { tick, balls: state.balls, respawnTicks: state.respawnTicks, paddle: this.ownPaddle, width };
     const claim = this.lastFrame && detectSave(this.lastFrame, frame, this.gates.length, this.config);
     this.lastFrame = frame;
     if (!claim || claim.tick - this.lastClaimTick < CLAIM_GAP_TICKS) return;

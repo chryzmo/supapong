@@ -104,6 +104,10 @@ About a day, plus time spent playing to tune it.
 
 ### Phase 3: online, as a room option
 
+Done: migration `20261025020000_power_ups.sql`, the lobby option and label, the snapshot fields, wide paddles in prediction, saves and the host's checks, Hard bots aiming for tokens, and the looser minimum match length.  Two things differ from the plan below:
+- `start` carries the oldest protocol that can play the match (3 with power-ups, 2 without), so old tabs only have to reload for power-up matches.
+- Guests' replays take only paddles from snapshots, keeping the effects the physics works out.
+
 - **Migration** (additive):
   - `rooms.power_ups boolean not null default true`;
   - `create_room(name, max_players, goal_limit = 10, power_ups = true)`;

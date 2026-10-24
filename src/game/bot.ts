@@ -1,14 +1,18 @@
 // Computer-controlled paddles, for the sandbox and for bots in a match (run by
 // the host).  Pure, like physics.ts.
 import {
+  DT,
   angleDiff,
   exitTime,
   gateCenter,
+  gateHalfWidth,
+  paddleBounce,
   paddleHalfWidth,
   paddleWidth,
   type Dir,
   type GameState,
   type PhysicsConfig,
+  type Pickup,
 } from './physics';
 
 /** The skill levels a host can pick for the bots in a match. */
@@ -20,6 +24,10 @@ export const BOT_LEVELS = [
 
 /** How far off its paddle's center a bot meets the ball, as a share of the half-width. */
 const AIM_OFFSET = 0.3;
+/** From this skill up (Hard), a bot aims its returns through a token when it can. */
+const AIMS_FOR_TOKENS = 0.75;
+/** Where on its paddle a bot will consider meeting the ball to reach a token: -0.8 to 0.8 of the half-width. */
+const TOKEN_AIMS = Array.from({ length: 17 }, (_, i) => -0.8 + i * 0.1);
 
 /**
  * Picks a direction for `gate`'s paddle.
@@ -39,6 +47,9 @@ const AIM_OFFSET = 0.3;
  * the angle grows with each return instead of one bot undoing the last.
  *
  * With several balls in play, it goes for the one it would meet soonest.
+ * From AIMS_FOR_TOKENS up, if a token is out and some spot on its paddle
+ * would send the ball through it, the bot meets the ball there instead, and
+ * lines up more precisely to do it.
  *
  * @param skill 0 (sleepy) to 1 (reads every ball from the moment it's hit).
  */
@@ -54,6 +65,7 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
 
   let target = gateCenter(gate, n);
   let soonest = Infinity;
+  let precise = false;
   for (const { x, y, vx, vy, rally } of state.respawnTicks === 0 ? state.balls : []) {
     const outward = x * vx + y * vy > 0;
     const r = Math.hypot(x, y);
@@ -67,12 +79,38 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
     // paddle's counterclockwise end (paddle clockwise of it) adds to it.
     const drift = vy * Math.cos(crossing) - vx * Math.sin(crossing);
     const side = drift > 0 || (drift === 0 && rally % 2 === 0) ? 1 : -1;
-    target = crossing - side * AIM_OFFSET * half;
+    const throughToken = skill >= AIMS_FOR_TOKENS && state.pickup ? aimThrough(x + vx * t, y + vy * t, vx, vy, state.pickup, config) : null;
+    const offset = throughToken ?? side * AIM_OFFSET;
+    precise = throughToken !== null;
+    // Meeting the ball `offset` of the half-width from the paddle's center
+    // puts the paddle there, the other way.
+    target = crossing - offset * half;
     soonest = t;
   }
 
   const diff = angleDiff(target, g.paddle);
-  const deadzone = half * 0.25;
+  // Lining up for a token, stop as close as the paddle's step per tick
+  // allows without overshooting back and forth.
+  const step = config.paddleSpeed * 2 * gateHalfWidth(n, config) * DT;
+  const deadzone = precise ? step * 0.6 : half * 0.25;
   if (Math.abs(diff) < deadzone) return 0;
   return diff > 0 ? 1 : -1;
+}
+
+/**
+ * Where on the paddle (as for paddleBounce's offset) to meet a ball arriving
+ * at (px, py) with velocity (vx, vy) so it heads through `token`, or null if
+ * nowhere does.  Of the spots that do, the middle one: the most room for
+ * the paddle being a little off.
+ */
+function aimThrough(px: number, py: number, vx: number, vy: number, token: Pickup, config: PhysicsConfig): number | null {
+  const radius = config.pickupRadius + config.ballRadius;
+  const through = TOKEN_AIMS.filter((offset) => {
+    const [bx, by] = paddleBounce(px, py, vx, vy, offset, config);
+    // How close the return's line comes to the token, ahead of the paddle.
+    const along = ((token.x - px) * bx + (token.y - py) * by) / (bx * bx + by * by);
+    return along > 0 && Math.hypot(px + bx * along - token.x, py + by * along - token.y) <= radius;
+  });
+  if (through.length === 0) return null;
+  return (through[0]! + through.at(-1)!) / 2;
 }

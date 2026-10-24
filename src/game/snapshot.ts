@@ -2,7 +2,7 @@
 // the client for smooth drawing.  Pure apart from the timestamps passed in.
 import type { StateMessage } from '../types';
 import { interpolate } from './interpolate';
-import { DEFAULT_CONFIG, DT, step, type Dir, type GameState, type PhysicsConfig } from './physics';
+import { DEFAULT_CONFIG, DT, PICKUP_KINDS, step, type Dir, type GameState, type PhysicsConfig } from './physics';
 
 const TICK_MS = DT * 1000;
 
@@ -31,6 +31,20 @@ export function encodeState(state: GameState): StateMessage {
     goals: state.goals,
     seed: state.seed,
     respawn: state.respawnTicks,
+    ...encodePowerUps(state),
+  };
+}
+
+/** The power-up fields of a snapshot, leaving out any with nothing to say. */
+function encodePowerUps(state: GameState): Partial<StateMessage> {
+  const { pickup, pickupTimer } = state;
+  const wide = state.gates.map((g) => g.wideTicks ?? 0);
+  const shield = state.gates.map((g) => g.shieldTicks ?? 0);
+  return {
+    ...(pickup ? { pickup: [PICKUP_KINDS.indexOf(pickup.kind), round(pickup.x), round(pickup.y), pickup.ticksLeft] } : {}),
+    ...(pickupTimer !== undefined ? { timer: pickupTimer } : {}),
+    ...(wide.some((t) => t > 0) ? { wide } : {}),
+    ...(shield.some((t) => t > 0) ? { shield } : {}),
   };
 }
 
@@ -43,11 +57,40 @@ export function decodeState(message: StateMessage): GameState {
   return {
     tick: message.tick,
     balls: message.balls.map(([x, y, vx, vy, lastTouch, rally]) => ({ x, y, vx, vy, lastTouch, rally })),
-    gates: message.paddles.map((paddle, i) => ({ paddle, active: message.active[i] ?? false })),
+    gates: message.paddles.map((paddle, i) => {
+      const wideTicks = message.wide?.[i] ?? 0;
+      const shieldTicks = message.shield?.[i] ?? 0;
+      return {
+        paddle,
+        active: message.active[i] ?? false,
+        ...(wideTicks > 0 ? { wideTicks } : {}),
+        ...(shieldTicks > 0 ? { shieldTicks } : {}),
+      };
+    }),
     scores: [...message.scores],
     goals: message.goals,
     respawnTicks: message.respawn,
     seed: message.seed ?? 0,
+    ...(message.pickup
+      ? { pickup: { kind: PICKUP_KINDS[message.pickup[0]] ?? 'wide', x: message.pickup[1], y: message.pickup[2], ticksLeft: message.pickup[3] } }
+      : {}),
+    ...(message.timer !== undefined ? { pickupTimer: message.timer } : {}),
+  };
+}
+
+/**
+ * `state` with the paddles from `gates`, but its own power-up effects.  The
+ * replay takes paddles from the snapshots (it has no inputs), while the
+ * physics works out the effects: a shield that breaks between two snapshots
+ * has to stay up until the ball reaches it.
+ */
+function withPaddles(state: GameState, gates: GameState['gates']): GameState {
+  return {
+    ...state,
+    gates: state.gates.map((g, i) => {
+      const from = gates[i];
+      return from ? { ...g, paddle: from.paddle, active: from.active } : g;
+    }),
   };
 }
 
@@ -165,7 +208,7 @@ export class SnapshotBuffer {
       // The claimed tick and the next, as on the host.
       const claimed = s.tick === from || s.tick === from + 1;
       const gates = this.paddlesAt(s.tick + 1).map((g, i) => (claimed && i === gate ? { ...g, paddle } : g));
-      return step({ ...s, gates }, still, this.config).state;
+      return step(withPaddles(s, gates), still, this.config).state;
     };
     let s = base;
     while (s.tick + 1 <= renderTick) s = advance(s);
@@ -175,7 +218,7 @@ export class SnapshotBuffer {
   /** The newest snapshot run on to `renderTick` (a late snapshot), paddles held. */
   private runOn(last: GameState, renderTick: number): GameState {
     const still: Dir[] = last.gates.map(() => 0);
-    const advance = (s: GameState): GameState => step({ ...s, gates: last.gates }, still, this.config).state;
+    const advance = (s: GameState): GameState => step(withPaddles(s, last.gates), still, this.config).state;
     let s = last;
     while (s.tick + 1 <= renderTick) s = advance(s);
     return renderTick === s.tick ? s : interpolate(s, advance(s), renderTick - s.tick);
@@ -203,7 +246,7 @@ export class SnapshotBuffer {
     const still: Dir[] = a.gates.map(() => 0);
     const advance = (s: GameState): GameState => {
       const gates = interpolate(a, b, (s.tick + 1 - a.tick) / span).gates;
-      return step({ ...s, gates }, still, this.config).state;
+      return step(withPaddles(s, gates), still, this.config).state;
     };
     let s = a;
     while (s.tick + 1 <= renderTick) s = advance(s);

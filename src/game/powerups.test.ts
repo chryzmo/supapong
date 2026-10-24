@@ -5,6 +5,7 @@ import {
   TICK_RATE,
   createGame,
   isOver,
+  paddleBounce,
   paddleReach,
   setGateActive,
   step,
@@ -215,5 +216,30 @@ describe('multiball', () => {
     expect(state.goals).toBe(1);
     expect(state.balls).toHaveLength(1);
     expect(isOver(state, limit)).toBe(true);
+  });
+});
+
+describe('bots', () => {
+  it('aim their returns through a token at Hard, and not below it', () => {
+    // A ball straight at gate 0.  Put a token where the return goes when met
+    // well off the paddle's center: a bot meeting it as usual would miss it.
+    const hitR = config.paddleRadius - config.ballRadius;
+    const shot = radial(0, 1);
+    const [bx, by] = paddleBounce(hitR, 0, shot.vx, shot.vy, 0.6, config);
+    const along = 0.45 / Math.hypot(bx, by);
+    const start = inPlay([shot], { pickup: token('wide', hitR + bx * along, by * along) });
+    const play = (skill: number) => {
+      let state = start;
+      for (let t = 0; t < seconds(3); t++) {
+        const inputs: Dir[] = state.gates.map((_, i) => (i === 0 ? botInput(state, 0, config, skill) : 0));
+        const result = step(state, inputs, config);
+        state = result.state;
+        const got = result.events.find((e) => e.type === 'pickup');
+        if (got) return got;
+      }
+      return undefined;
+    };
+    expect(play(0.9)).toEqual({ type: 'pickup', kind: 'wide', gate: 0, ball: 0 });
+    expect(play(0.6)).toBeUndefined();
   });
 });

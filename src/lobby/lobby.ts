@@ -54,6 +54,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   for (const n of GOAL_LIMIT_CHOICES) {
     goalsSelect.append(h('option', { value: String(n), selected: n === DEFAULT_GOAL_LIMIT }, `${n} goals`));
   }
+  const powerUpsToggle = h('input', { type: 'checkbox', name: 'power_ups', checked: true });
   const createButton = h('button', { type: 'submit' }, 'Create room');
   const createForm = h(
     'form',
@@ -61,6 +62,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     h('label', {}, 'Room name', nameInput),
     h('label', {}, 'Size', sizeSelect),
     h('label', {}, 'Match ends after', goalsSelect),
+    h('label', { className: 'check', title: 'Tokens on the board: wide paddle, shield, multiball' }, powerUpsToggle, 'Power-ups'),
     createButton,
   );
   createForm.addEventListener('submit', (event) => {
@@ -73,7 +75,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     void run(async () => {
       createButton.disabled = true;
       try {
-        const roomId = await createRoom(result.value, Number(sizeSelect.value), Number(goalsSelect.value));
+        const roomId = await createRoom(result.value, Number(sizeSelect.value), Number(goalsSelect.value), powerUpsToggle.checked);
         actions.enterRoom(roomId, 0);
       } finally {
         createButton.disabled = false;
@@ -104,7 +106,11 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
             'div',
             { className: 'room-info' },
             h('strong', {}, room.name),
-            h('span', { className: 'muted' }, `${room.hostName} · ${room.playerCount}/${room.maxPlayers} · ${room.goalLimit} goals`),
+            h(
+              'span',
+              { className: 'muted' },
+              `${room.hostName} · ${room.playerCount}/${room.maxPlayers} · ${room.goalLimit} goals · ${room.powerUps ? '⚡ power-ups' : 'classic'}`,
+            ),
           ),
           join,
         );

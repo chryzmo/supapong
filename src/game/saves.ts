@@ -16,6 +16,8 @@ export interface DrawnFrame {
   respawnTicks: number;
   /** The guest's own paddle, as drawn. */
   paddle: number;
+  /** Its width multiplier (paddleWidth), when not 1: a wide paddle. */
+  width?: number;
 }
 
 export interface SaveClaim {
@@ -62,6 +64,6 @@ function detectBallSave(
   const angle = Math.atan2(y + vy * t, x + vx * t);
   // The paddle partway through the frame, when the ball got there.
   const paddle = wrapAngle(prev.paddle + angleDiff(next.paddle, prev.paddle) * (t / span));
-  if (Math.abs(angleDiff(angle, paddle)) > paddleReach(gateCount, config)) return null;
+  if (Math.abs(angleDiff(angle, paddle)) > paddleReach(gateCount, config, prev.width ?? 1)) return null;
   return { tick: prev.tick + t / DT, paddle };
 }

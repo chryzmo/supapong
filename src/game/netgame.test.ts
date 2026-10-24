@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Gate, RoomEvent, StateMessage } from '../types';
 import { ClientGame, RESEND_MS } from './client';
 import { ADOPT_BURST_SECONDS, CLAIM_WINDOW_TICKS, COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
-import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleTravel, type GameState, type PhysicsConfig } from './physics';
+import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleReach, paddleTravel, type GameState, type PhysicsConfig } from './physics';
 import { INTERP_DELAY_MS } from './snapshot';
 
 const TICK_MS = DT * 1000;
@@ -236,6 +236,19 @@ describe('HostGame saves', () => {
     expect(host.claimSave(seat, crossing, paddle)).toBe(false);
     advance(CLAIM_WINDOW_TICKS * TICK_MS);
     expect(goals(events)).toHaveLength(1);
+  });
+
+  it("judges a claim with the guest's wide paddle, when they have one", () => {
+    // A paddle center just past where a normal paddle could reach the ball.
+    const offAxis = gateCenter(1, 3) + paddleReach(3, config) * 1.2;
+    const wide = (state: GameState): GameState => ({ ...state, gates: state.gates.map((g, i) => (i === 1 ? { ...g, wideTicks: 600 } : g)) });
+    const powered = { ...config, powerUps: true };
+    const normal = hostHarness(powered, gates, shotAt(1));
+    toGoal(normal.advance);
+    expect(normal.host.claimSave(2, crossing, offAxis)).toBe(false);
+    const widened = hostHarness(powered, gates, wide(shotAt(1)));
+    toGoal(widened.advance);
+    expect(widened.host.claimSave(2, crossing, offAxis)).toBe(true);
   });
 
   it('refuses a claim naming a ball that never reached the paddle', () => {

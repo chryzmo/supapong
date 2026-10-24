@@ -79,26 +79,37 @@ describe('parseRoomEvent', () => {
   });
 
   it('accepts start, closed and removed', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 2 });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 2, powerUps: false });
+  });
+
+  it('keeps the power-ups flag', () => {
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 10, protocol: 3, powerUps: true })).toEqual({
+      type: 'start',
+      gates,
+      goalLimit: 10,
+      protocol: 3,
+      powerUps: true,
+    });
   });
 
   it('treats a start without a protocol (a host on older code) as protocol 1', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 1 });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 1, powerUps: false });
   });
 
   it('keeps the bot flag on bot gates', () => {
     const withBot = [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1', bot: true }];
-    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 });
+    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2, powerUps: false });
     expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10, protocol: 2 })).toEqual({
       type: 'start',
       gates: [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1' }],
       goalLimit: 10,
       protocol: 2,
+      powerUps: false,
     });
   });
 
   it('plays to 10 when a start has no goal limit (a host on the previous version)', () => {
-    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, protocol: 1 });
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, protocol: 1, powerUps: false });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
     expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
   });
@@ -108,6 +119,7 @@ describe('parseRoomEvent', () => {
     ['a start with one gate', { type: 'start', gates: gates.slice(0, 1) }],
     ['a start with no goals to play', { type: 'start', gates, goalLimit: 0 }],
     ['a start with protocol 0', { type: 'start', gates, goalLimit: 10, protocol: 0 }],
+    ['a start with a power-ups flag that isn\'t a boolean', { type: 'start', gates, goalLimit: 10, powerUps: 'yes' }],
     ['a start with a fractional protocol', { type: 'start', gates, goalLimit: 10, protocol: 1.5 }],
     ['a start with too many goals', { type: 'start', gates, goalLimit: 51 }],
     ['a start with a fractional goal limit', { type: 'start', gates, goalLimit: 2.5 }],
@@ -195,6 +207,11 @@ describe('parseStateMessage', () => {
     expect(parseStateMessage({ ...state, seed: 4294967295 })).toEqual({ ...state, seed: 4294967295 });
   });
 
+  it('keeps the power-up fields when there are some', () => {
+    const powered = { ...state, pickup: [2, 0.3, -0.4, 120], timer: 300, wide: [0, 90, 0], shield: [5, 0, 0] };
+    expect(parseStateMessage(powered)).toEqual(powered);
+  });
+
   it.each([
     ['a short ball', { ...state, balls: [[0, 0, 0, 0, -1]] }],
     ['a NaN in a ball', { ...state, balls: [[0, Number.NaN, 0, 0, -1, 0]] }],
@@ -214,6 +231,12 @@ describe('parseStateMessage', () => {
     ['a missing respawn', { ...state, respawn: undefined }],
     ['a fractional seed', { ...state, seed: 1.5 }],
     ['a seed past 32 bits', { ...state, seed: 2 ** 32 }],
+    ['a token of an unknown kind', { ...state, pickup: [3, 0, 0, 10] }],
+    ['a short token', { ...state, pickup: [0, 0, 0] }],
+    ['a token with fractional ticks left', { ...state, pickup: [0, 0, 0, 1.5] }],
+    ['a negative timer', { ...state, timer: -1 }],
+    ['wide paddles for the wrong number of gates', { ...state, wide: [0, 0] }],
+    ['a fractional shield', { ...state, shield: [0, 0.5, 0] }],
   ])('rejects %s', (_label, value) => {
     expect(parseStateMessage(value)).toBeNull();
   });

@@ -2,7 +2,7 @@
 
 Multiplayer Pong on a circular board, built to show what [Supabase](https://supabase.com) can do as the *entire* backend of a real-time game.
 
-Two to eight players each defend a gate on the rim. When the ball gets past your paddle into your gate, the last player to touch it scores. There is no game server: browsers talk to Supabase directly, and one player's browser (the room's host) runs the physics.
+Two to eight players each defend a gate on the rim. When the ball gets past your paddle into your gate, the last player to touch it scores. With power-ups on, tokens appear on the board: knock the ball through one for a wide paddle, a shield over your gate, or multiball. There is no game server: browsers talk to Supabase directly, and one player's browser (the room's host) runs the physics.
 
 - **Frontend:** Vite and strict TypeScript, plain DOM and Canvas 2D, no frameworks.
 - **Backend:** Supabase Auth (anonymous), Postgres with Row Level Security, RPCs, and Realtime (Postgres Changes, Presence, Broadcast).
@@ -21,7 +21,7 @@ make dev                   # http://127.0.0.1:5173
 
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
-- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
+- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Power-ups are on by default; untick them in Create room for a classic match.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
 ## How it fits together
@@ -123,7 +123,7 @@ The design is host-authoritative.  Guests replay the host's physics between snap
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input:{player_id}` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
 | `state` | host → guests | 20 Hz | `{ tick, balls: [x, y, vx, vy, touch, rally][], paddles[], active[], scores[], goals, seed, respawn }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
-| `event` | host → all | rare | `start` (gate order, bots marked, goal limit, protocol version), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
+| `event` | host → all | rare | `start` (gate order, bots marked, goal limit, power-ups on or off, the oldest protocol version that can play it), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.
 
@@ -167,7 +167,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
 ## What changes at scale
 
 - **Authority moves to a server.** A dedicated game process (a small Node or Go service, or a managed game server) would run the physics.  Supabase would keep handling identity, rooms, results and the lobby, and could keep carrying the traffic over Broadcast.  Edge Functions aren't a fit for a 60 Hz loop that lasts minutes.
-- **Inputs tied to their sender.** With a game server, each player's input would arrive over their own authenticated connection, instead of claiming a seat on a shared channel.
+- **Inputs tied to their sender.** Today each player sends inputs on their own Realtime topic, which only they may send on, so the host knows whose they are.  With a game server, each player's input would arrive over their own authenticated connection instead.
 - **Faster housekeeping.** The cleanup job's 2-hour cutoff is fine at this size.  With a server running matches, abandoned rooms could be closed the moment their host disappears instead.
 - **The lobby scales differently.** Every lobby client refetching on every room change is fine for dozens of rooms.  For thousands, you'd want:
   - lobby updates broadcast from a database trigger (`realtime.broadcast_changes`) carrying the changed row;

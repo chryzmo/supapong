@@ -7,10 +7,18 @@ export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
 /**
  * The version of the match messages this code speaks.  2: snapshots carry
- * `balls`.  The host puts it in `start`, so a guest on older code can tell
- * it needs to reload (from version 2 on).
+ * `balls`.  3: power-ups.  The host's `start` says the oldest version that
+ * can play that match (matchProtocol), so a guest on older code knows to
+ * reload, and only when it has to.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
+
+/** The oldest PROTOCOL_VERSION that can play a match. */
+export function matchProtocol(powerUps: boolean): number {
+  return powerUps ? 3 : 2;
+}
+/** How many kinds of token there are (PICKUP_KINDS in physics.ts). */
+const PICKUP_KIND_COUNT = 3;
 /** Most balls a snapshot may carry. */
 export const MAX_BALLS = 8;
 /** Goals in total that end a match.  The database accepts 1 to 50; the lobby offers these. */
@@ -32,6 +40,7 @@ export interface LobbyRoom {
   playerCount: number;
   maxPlayers: number;
   goalLimit: number;
+  powerUps: boolean;
 }
 
 /** A room the current player is seated in. */
@@ -41,6 +50,7 @@ export interface SeatedRoom {
   hostId: string;
   maxPlayers: number;
   goalLimit: number;
+  powerUps: boolean;
   seat: number;
 }
 
@@ -119,8 +129,10 @@ export interface MatchStart {
   gates: Gate[];
   /** Goals in total that end the match, from the room. */
   goalLimit: number;
-  /** The host's PROTOCOL_VERSION.  1 when a host on older code leaves it out. */
+  /** The oldest PROTOCOL_VERSION that can play this match (matchProtocol).  1 when a host on older code leaves it out. */
   protocol: number;
+  /** Whether the match has power-ups.  Off when a host on older code leaves it out. */
+  powerUps: boolean;
   /** Host only, never sent: how well the bots play, 0 to 1 (see botInput). */
   botSkill?: number;
 }
@@ -175,6 +187,15 @@ export interface StateMessage {
   seed?: number;
   /** Ticks until the ball launches; 0 while it's in play. */
   respawn: number;
+  // Power-ups.  Left out when there's nothing to say, so a classic match's
+  // snapshots stay as they were.
+  /** The token on the board: kind (an index into PICKUP_KINDS), x, y, ticks left. */
+  pickup?: [number, number, number, number];
+  /** Ticks of play with an empty board until the timer puts a token out. */
+  timer?: number;
+  /** Per gate: ticks left of a wide paddle, and of a shield. */
+  wide?: number[];
+  shield?: number[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,7 +257,9 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       if (!isCount(goalLimit) || goalLimit < 1 || goalLimit > GOAL_LIMIT_MAX) return null;
       const protocol = value.protocol ?? 1;
       if (!isCount(protocol) || protocol < 1) return null;
-      return { type: 'start', gates, goalLimit, protocol };
+      const powerUps = value.powerUps ?? false;
+      if (typeof powerUps !== 'boolean') return null;
+      return { type: 'start', gates, goalLimit, protocol, powerUps };
     }
     case 'closed':
       return { type: 'closed' };
@@ -286,6 +309,16 @@ export function parseStateMessage(value: unknown): StateMessage | null {
   if (!Array.isArray(scores) || scores.length !== n || !scores.every(isCount)) return null;
   const balls = parseBalls(value, n);
   if (!balls) return null;
+  const { pickup, timer, wide, shield } = value;
+  if (pickup !== undefined) {
+    if (!isNumberArray(pickup, 4)) return null;
+    const [kind, , , ticksLeft] = pickup;
+    if (!(isCount(kind) && kind < PICKUP_KIND_COUNT) || !isCount(ticksLeft)) return null;
+  }
+  if (timer !== undefined && !isCount(timer)) return null;
+  for (const effect of [wide, shield]) {
+    if (effect !== undefined && !(Array.isArray(effect) && effect.length === n && effect.every(isCount))) return null;
+  }
   return {
     tick,
     balls,
@@ -295,6 +328,10 @@ export function parseStateMessage(value: unknown): StateMessage | null {
     goals,
     ...(seed !== undefined ? { seed } : {}),
     respawn,
+    ...(isNumberArray(pickup, 4) ? { pickup: [pickup[0]!, pickup[1]!, pickup[2]!, pickup[3]!] } : {}),
+    ...(isCount(timer) ? { timer } : {}),
+    ...(Array.isArray(wide) ? { wide: wide.filter(isCount) } : {}),
+    ...(Array.isArray(shield) ? { shield: shield.filter(isCount) } : {}),
   };
 }
 

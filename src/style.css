@@ -119,15 +119,20 @@ h2 {
   white-space: nowrap;
 }
 
-/* Room name on its own row, then size and goal limit side by side. */
+/* Room name on its own row, then size and goal limit side by side, then power-ups. */
 form.create {
   grid-template-columns: 1fr 1fr;
   align-items: end;
 }
 
 form.create label:first-child,
+form.create label.check,
 form.create button {
   grid-column: 1 / -1;
+}
+
+form.create label.check {
+  padding-bottom: 0;
 }
 
 input,
