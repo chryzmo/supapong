@@ -37,7 +37,7 @@ flowchart LR
   subgraph S["Supabase"]
     direction TB
     Auth["Auth<br/>anonymous sign-in"]
-    DB[("Postgres + RLS<br/>profiles · rooms · room_players · match_results<br/>lobby_rooms view · RPCs")]
+    DB[("Postgres + RLS<br/>profiles · rooms · room_players · match_results<br/>lobby_rooms · match_players · leaderboard views · RPCs")]
     RT{{"Realtime"}}
   end
 
@@ -63,11 +63,15 @@ sequenceDiagram
   H->>RT: Presence track {playerId, displayName, seat}
   G->>RT: Presence track
   H->>DB: set_room_status('playing') via startMatch
-  H->>RT: Broadcast event {start, gates}
+  H->>RT: Broadcast event {start, gates, goalLimit}
   loop every tick (60 Hz) on the host
-    G->>RT: Broadcast input {seat, dir} (only on change)
+    G->>RT: Broadcast input {seat, dir, paddle} (on change, 5 Hz while moving)
     H->>RT: Broadcast state (every 3rd tick = 20 Hz)
     RT-->>G: state → buffer, draw 100 ms behind
+    opt the guest's screen shows a save the host missed
+      G->>RT: Broadcast input {…, save: {tick, paddle}}
+      Note over H: rewind, replay with the guest's paddle
+    end
   end
   H->>RT: Broadcast event {end, scores}
   H->>DB: finish_match() — result + status, one transaction
@@ -98,9 +102,9 @@ Deliberately not used yet:
 
 ## Netcode
 
-The design is host-authoritative with client-side interpolation.
+The design is host-authoritative.  Guests replay the host's physics between snapshots, predict their own paddle, and can claim saves the host missed.
 
-- **The host** ([`src/game/host.ts`](src/game/host.ts)) runs [`physics.ts`](src/game/physics.ts) at a fixed 60 Hz and applies everyone's inputs.
+- **The host** ([`src/game/host.ts`](src/game/host.ts)) runs [`physics.ts`](src/game/physics.ts) at a fixed 60 Hz, applies everyone's inputs, and drives any bots.
   - It broadcasts a snapshot every 3rd tick (20 Hz), plus `goal` and `end` events.
   - Its timer runs in a Web Worker, because browsers throttle timers in background tabs and a hidden host tab would otherwise freeze the match.
 - **Guests** ([`src/game/client.ts`](src/game/client.ts)) buffer snapshots and draw 100 ms in the past.  Between two snapshots they replay the physics from the earlier one, since the ball can cover several ball widths between snapshots and a straight line would cut the corner at every bounce.
@@ -110,7 +114,7 @@ The design is host-authoritative with client-side interpolation.
 - **Saves the guest saw** ([`src/game/saves.ts`](src/game/saves.ts)).  A guest sees the ball ~100 ms late but their own paddle now, so a save on their screen can be a miss on the host.
   - The guest's client spots this (the ball reached their paddle on screen, and the host's ball didn't bounce) and sends a save claim with the tick and paddle position.
   - The host keeps the last 250 ms of ticks.  If the claim is recent, comes from that gate's player, is within 0.4 s of paddle travel of where the host had it, and turns out to be a hit when replayed, the host rewinds to that tick and replays to the present with the guest's paddle.  The physics is pure, so a rewind is a few dozen steps.
-  - So a late save can still cancel a goal, goals against a guest become official (scored, flashed, counted toward the end) only after that 250 ms.  Goals against the host or a bot are official at once.
+  - So that a late save can still cancel a goal, goals against a guest become official (scored, flashed, counted toward the end) only after that 250 ms.  Goals against the host or a bot are official at once.
   - The guest draws its own claim straight away, replaying the save locally until the host's corrected snapshots reach the screen.  Otherwise the snapshots already on their way would show the goal first.
 - **Physics** is pure and deterministic: no DOM, no clocks, and seeded randomness carried in the state.
   - Collisions are found by solving exactly when the ball crosses the paddle and rim circles, so a fast ball can't skip through a paddle between ticks.
@@ -119,7 +123,7 @@ The design is host-authoritative with client-side interpolation.
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
 | `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, seed, respawn, rally }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
-| `event` | host → all | rare | `start` (gate order), `goal`, `end` (scores), `closed`, `removed` |
+| `event` | host → all | rare | `start` (gate order, bots marked, goal limit), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.
 
@@ -136,29 +140,30 @@ npm run check   # everything below; the pre-commit hook runs this
 
 | Layer | Tool | What it covers |
 |---|---|---|
-| Unit (`src/**/*.test.ts`) | Vitest | Physics (including a 20,000-tick determinism and containment test), bots, interpolation, snapshot encoding and buffering, host and client with a fake clock and network, message parsers, Presence logic, standings |
+| Unit (`src/**/*.test.ts`) | Vitest | Physics (including a 20,000-tick determinism and containment test) and last-touch scoring, bots and match lineups, interpolation, snapshot encoding, replay and buffering under jittery arrivals, host and client with a fake clock and network (including an end-to-end late save over a simulated 40 ms link), save detection, message parsers, Presence logic, standings, stats formatting, the mobile-browser check |
 | Database (`supabase/tests/database/`) | pgTAP via `supabase test db` | Every RLS policy (tables and private channels), table grants, constraints and RPCs: who can do what, error codes, status transitions, result validation, and the cleanup job |
-| Integration (`tests/integration/`) | Vitest against the local stack | The app's own modules acting as several players: sign-in, lobby queries, the 12-way join race, live lobby updates, Presence and seat cleanup, and full networked matches where results get recorded |
+| Integration (`tests/integration/`) | Vitest against the local stack | The app's own modules acting as several players: sign-in, lobby queries and goal limits, the 12-way join race, live lobby updates, Presence and seat cleanup, starting with bots, full networked matches where results get recorded, and the leaderboard and history |
 | Typecheck and schema drift | `tsc`, `supabase gen types` | Strict TypeScript, and generated types matching the local schema |
 
 Integration tests don't use the sign-in endpoint for their players.  They create users with the admin API and sign JWTs with the local stack's secret, which keeps runs under the local anonymous sign-in rate limit.  One test covers the real anonymous sign-in path.
 
-The tests don't cover the DOM screens themselves.  Those were checked during development by driving headless Chrome by hand.
+The tests don't cover the DOM screens themselves.  Those are checked by hand in a browser.
 
 ## Known limitations
 
 These are deliberate trade-offs for a prototype.  Each one is noted where it lives in the code.
 
 - **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.
-- **Seated players can spoof each other's inputs.** Room channels are private: outsiders can't join, and only the host can broadcast state and events.  But a Broadcast message doesn't carry its sender, so a guest's `input` claims a seat number the host can't verify.  A seated player could move someone else's paddle.
+- **Seated players can spoof each other's inputs.** Room channels are private: outsiders can't join, and only the host can broadcast state and events.  But a Broadcast message doesn't carry its sender, so a guest's `input` claims a seat number the host can't verify.  A seated player could move someone else's paddle, or claim saves in their name.
 - **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **Guests decide their own saves.** A guest's claim is checked for plausibility, not proof, so a modified client could claim saves it didn't make.  That's the anti-cheat non-goal again.
 - **A late save looks like a jump to everyone else.** When the host accepts a claim, the host and other guests see the ball, already past the paddle or gone, come back on its bounce.  The guest who made the save sees it as it happened.
 - **Slow connections lose the benefit.** A claim has to reach the host within 250 ms of the moment, which covers the 100 ms drawing delay plus a round trip of about 130 ms.  Beyond that, claims are refused and the host's call stands.
-- **Launches are aimed at gates.** An early version launched in any direction.  A launch into a wall travels along a diameter, and a plain bounce keeps it there.  With an even number of gates every wall faces another wall, so about 40% of launches with 2 or 4 gates bounced out of everyone's reach forever.  Launches now aim at a random point inside a random active gate, so each one reaches a player in about 1.6 s.  Wall bounces also add a small random turn (±5°), so later rallies can't settle on a diameter either.
-- **Live cleanup happens in browsers.** Removing a disconnected player's seat is the host's job, and a match whose host vanished just stops.  The `pg_cron` job is the backstop: it deletes any room older than 2 hours, and anonymous users idle for 7 days.  A deleted player's id stays in old `match_results.scores`, with no name to go with it.
+- **Launches are aimed at gates.** An early version launched in any direction.  A launch into a wall travels along a diameter, and a plain bounce keeps it there.  With an even number of gates every wall faces another wall, so about 40% of launches with 2 or 4 gates bounced out of everyone's reach forever.  Launches now aim at a random point inside a random active gate, so each one reaches a player in about 1.1 s.  Wall bounces also add a small random turn (±5°), so later rallies can't settle on a diameter either.
+- **Live cleanup happens in browsers.** Removing a disconnected player's seat is the host's job, and a match whose host vanished just stops.  The `pg_cron` job is the backstop: it deletes any room older than 2 hours, and anonymous users idle for 7 days.  Results keep the room and player names they had when the match ended, so history still reads right afterwards.
 - **Anonymous sign-in is behind a CAPTCHA, and that's all.** Turnstile stops scripted sign-ups, and Supabase's per-IP rate limit backs it up.  The local config raises that limit to 100 an hour for testing.
-- **Players are anonymous.** Clearing the tab's storage means a new identity.  Accounts would come from linking anonymous users to email or OAuth.
+- **Players are anonymous.** Closing the tab or clearing its storage means a new identity, so stats and history only follow a player for as long as the tab lives.  Accounts would come from linking anonymous users to email or OAuth.
+- **Older results were scored differently.** Until last-touch scoring, every goal gave a point to everyone except the conceding player.  Results don't record which rule they used, so the leaderboard's point totals mix both.  Wins mean the same under either.
 
 ## What changes at scale
 
@@ -169,7 +174,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
   - lobby updates broadcast from a database trigger (`realtime.broadcast_changes`) carrying the changed row;
   - pagination and filters;
   - possibly a separate "open rooms" table.
-- **Message budget.** Each match sends 20 snapshots a second to every guest, plus inputs.  Realtime quotas count messages, so cost grows with matches × players.  Lower snapshot rates, sending only what changed, or binary payloads are the next levers.
+- **Message budget.** Each match sends 20 snapshots a second to every guest, plus inputs (up to 5 a second from each moving guest).  Realtime quotas count messages, so cost grows with matches × players.  Lower snapshot rates, sending only what changed, or binary payloads are the next levers.
 - **Stats get stored, not recomputed.** The `leaderboard` and `match_players` views recompute from every result on each read.  With many results, a trigger on `match_results` would keep a per-player stats table up to date instead, and history would page by `finished_at`.
 
 ## Deploying
