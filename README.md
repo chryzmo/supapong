@@ -104,7 +104,8 @@ The design is host-authoritative with client-side interpolation.
   - It broadcasts a snapshot every 3rd tick (20 Hz), plus `goal` and `end` events.
   - Its timer runs in a Web Worker, because browsers throttle timers in background tabs and a hidden host tab would otherwise freeze the match.
 - **Guests** ([`src/game/client.ts`](src/game/client.ts)) buffer snapshots and draw 100 ms in the past.  Between two snapshots they replay the physics from the earlier one, since the ball can cover several ball widths between snapshots and a straight line would cut the corner at every bounce.
-  - Host time is estimated from the least-delayed arrival, so jitter doesn't shake the picture.
+  - Host time is estimated from the least-delayed arrival, and the drawing clock eases toward that estimate (at most 5% fast or slow) instead of jumping, so jitter doesn't shake the picture.
+  - If a snapshot is late, the physics runs on from the newest one for up to 150 ms, instead of the picture freezing and then jumping when it arrives.
   - A guest's own paddle is predicted locally: it moves the moment a key is pressed.  Inputs carry the paddle's position, and the host adopts it, so the host's copy stops where the player stopped.
 - **Saves the guest saw** ([`src/game/saves.ts`](src/game/saves.ts)).  A guest sees the ball ~100 ms late but their own paddle now, so a save on their screen can be a miss on the host.
   - The guest's client spots this (the ball reached their paddle on screen, and the host's ball didn't bounce) and sends a save claim with the tick and paddle position.

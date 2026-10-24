@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseStateMessage } from '../types';
 import { DEFAULT_CONFIG, DT, createGame, step, type Dir, type GameState } from './physics';
-import { INTERP_DELAY_MS, SnapshotBuffer, decodeState, encodeState } from './snapshot';
+import { INTERP_DELAY_MS, MAX_EXTRAPOLATE_TICKS, SnapshotBuffer, decodeState, encodeState } from './snapshot';
 
 const TICK_MS = DT * 1000;
 
@@ -87,10 +87,49 @@ describe('SnapshotBuffer', () => {
     expect(worst).toBeLessThan(0.001);
   });
 
-  it('holds the last snapshot instead of extrapolating', () => {
+  it('runs the physics on when the next snapshot is late, for at most MAX_EXTRAPOLATE_TICKS', () => {
     const buffer = new SnapshotBuffer();
     for (const s of snapshots.slice(0, 5)) buffer.push(s, arrival(s));
+    const last = snapshots[4]!;
+    // Five ticks past the newest snapshot, the ball is where the host had it.
+    const drawn = buffer.sample(arrival(last) + INTERP_DELAY_MS + 5 * TICK_MS)!;
+    const host = states.find((s) => s.tick === last.tick + 5)!;
+    expect(Math.hypot(drawn.ball.x - host.ball.x, drawn.ball.y - host.ball.y)).toBeLessThan(1e-9);
+    // And no further than the limit, however late.
+    expect(buffer.sample(1e9)!.tick).toBe(last.tick + MAX_EXTRAPOLATE_TICKS);
+  });
+
+  it('holds the last snapshot when it has no seed to run on with', () => {
+    const buffer = new SnapshotBuffer();
+    for (const s of snapshots.slice(0, 5)) buffer.push(s, arrival(s), false);
     expect(buffer.sample(1e9)).toBe(snapshots[4]);
+  });
+
+  it('draws smoothly through jittery arrivals', () => {
+    // A long rally, with each snapshot 0 to 80 ms late.
+    const host = playing(900);
+    let seed = 7;
+    const jitter = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31) * 80;
+    const sent = host.filter((s) => s.tick % 3 === 0).map((s) => ({ s, at: 10_000 + s.tick * TICK_MS + 40 + jitter() }));
+    sent.sort((a, b) => a.at - b.at);
+    const buffer = new SnapshotBuffer();
+    let next = 0;
+    let previous: number | undefined;
+    let worstStep = 0;
+    let worstBall = 0;
+    for (let now = 10_000 + 2000; now < 10_000 + 14_000; now += 16) {
+      while (next < sent.length && sent[next]!.at <= now) buffer.push(sent[next]!.s, sent[next++]!.at);
+      const tick = buffer.renderTick(now)!;
+      const drawn = buffer.sample(now)!;
+      if (previous !== undefined) worstStep = Math.max(worstStep, Math.abs((tick - previous) * TICK_MS - 16));
+      previous = tick;
+      const truth = host[Math.round(tick) - 1]!;
+      if (Math.abs(tick - Math.round(tick)) < 0.01) worstBall = Math.max(worstBall, Math.hypot(drawn.ball.x - truth.ball.x, drawn.ball.y - truth.ball.y));
+    }
+    // The drawing clock never jumps or stalls: each 16 ms frame moves it 16 ms, give or take 5%.
+    expect(worstStep).toBeLessThanOrEqual(16 * 0.05 + 1e-9);
+    // And the ball is where the host had it.
+    expect(worstBall).toBeLessThan(1e-3);
   });
 
   it('ignores late and duplicate snapshots', () => {

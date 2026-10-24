@@ -353,6 +353,19 @@ describe('ClientGame', () => {
     expect(client.predictedPaddle()).toBeCloseTo(hostPaddle, 3);
   });
 
+  it("doesn't chase the host's stale copy of its paddle right after a key release", () => {
+    const { client, tick } = clientHarness();
+    tick(0);
+    client.setOwnInput(1);
+    tick(100);
+    client.setOwnInput(0);
+    const stopped = client.predictedPaddle();
+    // A snapshot from before the host heard about the release: our paddle still going.
+    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, stopped + 0.1, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 10, rally: 0 });
+    for (let i = 0; i < 20; i++) tick(16);
+    expect(client.predictedPaddle()).toBeCloseTo(stopped, 9);
+  });
+
   it("doesn't draw a predicted paddle for a gate that's been walled off", () => {
     const { client, tick } = clientHarness();
     client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 0, rally: 0 });

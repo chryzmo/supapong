@@ -8,6 +8,12 @@ import { SnapshotBuffer, decodeState } from './snapshot';
 
 /** Share of the gap to the host's paddle closed per frame once we stop moving. */
 const RECONCILE_RATE = 0.15;
+/**
+ * Don't ease toward the host's copy of our paddle this soon after we sent an
+ * input.  Until the host has it, its snapshots still show our paddle moving,
+ * and easing toward them made the paddle wobble after every key release.
+ */
+const RECONCILE_AFTER_MS = 500;
 /** While moving, resend our paddle position this often, so the host's copy can't drift. */
 export const RESEND_MS = 200;
 /** Ticks between save claims, so one save is claimed once. */
@@ -99,11 +105,11 @@ export class ClientGame {
     const now = this.now();
     this.advanceOwnPaddle(now);
     if (this.ownDir !== 0 && now - this.lastSentAt >= RESEND_MS) this.send(now);
-    // While we're still, ease toward where the host has our paddle.  The host
-    // adopts our position, so this only matters if a message was lost.  While
-    // moving, the host lags behind by our input's travel time, so leave it.
+    // Once we've been still a while, ease toward where the host has our
+    // paddle.  The host adopts our position, so this only matters if a
+    // message was lost.
     const hostPaddle = this.buffer.latest()?.gates[this.myGate]?.paddle;
-    if (hostPaddle !== undefined && this.ownDir === 0) {
+    if (hostPaddle !== undefined && this.ownDir === 0 && now - this.lastSentAt >= RECONCILE_AFTER_MS) {
       this.ownPaddle += angleDiff(hostPaddle, this.ownPaddle) * RECONCILE_RATE;
     }
 

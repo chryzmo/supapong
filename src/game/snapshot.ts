@@ -8,6 +8,15 @@ const TICK_MS = DT * 1000;
 
 /** How far behind the host clients draw.  Two snapshots at 20 Hz, so there's usually one on each side. */
 export const INTERP_DELAY_MS = 100;
+/**
+ * When a snapshot is late, how far past the newest one the physics may run
+ * on (150 ms), instead of freezing the picture until it arrives.
+ */
+export const MAX_EXTRAPOLATE_TICKS = 9;
+/** The drawing clock runs at most this much fast or slow while catching up with its estimate of host time. */
+const CLOCK_SLEW = 0.05;
+/** An estimate this far off (say, after the tab was hidden) is jumped to rather than eased toward. */
+const CLOCK_SNAP_MS = 250;
 
 /** Rounds to 4 decimal places: about 1/10000 of the board, invisible on screen, and much shorter JSON. */
 const round = (v: number): number => Math.round(v * 1e4) / 1e4;
@@ -54,7 +63,13 @@ export function decodeState(message: StateMessage): GameState {
  * Host time is estimated from arrivals: each snapshot says which tick it is,
  * so arrival time minus tick time gives the offset between the two clocks
  * plus network delay.  We keep the smallest offset seen (the least-delayed
- * arrival), and let it drift up slowly in case the delay really grows.
+ * arrival), and let it drift up slowly in case the delay really grows.  The
+ * drawing clock eases toward that estimate (CLOCK_SLEW) rather than jumping,
+ * which would skip the picture forward each time a quicker arrival lowers it.
+ *
+ * If the next snapshot is late, the physics runs on from the newest one for
+ * up to MAX_EXTRAPOLATE_TICKS, with paddles held where they were, instead of
+ * freezing and then jumping when it arrives.
  *
  * Between two snapshots the ball is replayed with the real physics rather
  * than drawn along a straight line.  Snapshots are 3 ticks apart, and a fast
@@ -63,7 +78,11 @@ export function decodeState(message: StateMessage): GameState {
  */
 export class SnapshotBuffer {
   private snapshots: GameState[] = [];
+  /** Where the arrivals say the clock offset is. */
+  private targetOffsetMs: number | undefined;
+  /** The offset we draw with, easing toward the target. */
   private offsetMs: number | undefined;
+  private clockAt: number | undefined;
   /** False once a snapshot arrives without a seed: those get the straight-line blend. */
   private replayable = true;
 
@@ -75,8 +94,8 @@ export class SnapshotBuffer {
     if (last && state.tick <= last.tick) return; // Late or duplicate.
     this.replayable &&= replayable;
     const sample = arrivalMs - state.tick * TICK_MS;
-    this.offsetMs =
-      this.offsetMs === undefined || sample < this.offsetMs ? sample : this.offsetMs + (sample - this.offsetMs) * 0.05;
+    const target = this.targetOffsetMs;
+    this.targetOffsetMs = target === undefined || sample < target ? sample : target + (sample - target) * 0.05;
     this.snapshots.push(state);
     if (this.snapshots.length > 30) this.snapshots.shift();
   }
@@ -86,27 +105,43 @@ export class SnapshotBuffer {
   }
 
   /**
-   * The host tick sample(nowMs) shows, fractional and held within the
-   * buffered snapshots, or undefined before the first snapshot.
+   * The host tick sample(nowMs) shows, fractional, kept between the oldest
+   * buffered snapshot and as far past the newest as we'll run on.  Undefined
+   * before the first snapshot.
    */
   renderTick(nowMs: number): number | undefined {
     const first = this.snapshots[0];
     const last = this.snapshots.at(-1);
-    if (!first || !last || this.offsetMs === undefined) return undefined;
-    const tick = (nowMs - INTERP_DELAY_MS - this.offsetMs) / TICK_MS;
-    return Math.max(first.tick, Math.min(last.tick, tick));
+    const offset = this.offsetAt(nowMs);
+    if (!first || !last || offset === undefined) return undefined;
+    const tick = (nowMs - INTERP_DELAY_MS - offset) / TICK_MS;
+    return Math.max(first.tick, Math.min(last.tick + (this.replayable ? MAX_EXTRAPOLATE_TICKS : 0), tick));
+  }
+
+  /** The drawing clock's offset at `nowMs`, eased toward the arrivals' estimate since the last call. */
+  private offsetAt(nowMs: number): number | undefined {
+    const target = this.targetOffsetMs;
+    if (target === undefined) return undefined;
+    if (this.offsetMs === undefined || this.clockAt === undefined) {
+      this.offsetMs = target;
+    } else if (nowMs > this.clockAt) {
+      const gap = target - this.offsetMs;
+      const most = CLOCK_SLEW * (nowMs - this.clockAt);
+      this.offsetMs = Math.abs(gap) > CLOCK_SNAP_MS ? target : this.offsetMs + Math.max(-most, Math.min(most, gap));
+    }
+    this.clockAt = Math.max(this.clockAt ?? nowMs, nowMs);
+    return this.offsetMs;
   }
 
   /** The state to draw at local time `nowMs`, or undefined before the first snapshot. */
   sample(nowMs: number): GameState | undefined {
     const first = this.snapshots[0];
     const last = this.snapshots.at(-1);
-    if (!first || !last || this.offsetMs === undefined) return undefined;
+    const renderTick = this.renderTick(nowMs);
+    if (!first || !last || renderTick === undefined) return undefined;
 
-    const renderTick = (nowMs - INTERP_DELAY_MS - this.offsetMs) / TICK_MS;
     if (renderTick <= first.tick) return first;
-    // No extrapolation: if snapshots stop, hold the last one.
-    if (renderTick >= last.tick) return last;
+    if (renderTick >= last.tick) return this.replayable ? this.runOn(last, renderTick) : last;
 
     for (let i = this.snapshots.length - 1; i > 0; i--) {
       const a = this.snapshots[i - 1]!;
@@ -141,6 +176,15 @@ export class SnapshotBuffer {
     let s = base;
     while (s.tick + 1 <= renderTick) s = advance(s);
     return interpolate(s, advance(s), renderTick - s.tick);
+  }
+
+  /** The newest snapshot run on to `renderTick` (a late snapshot), paddles held. */
+  private runOn(last: GameState, renderTick: number): GameState {
+    const still: Dir[] = last.gates.map(() => 0);
+    const advance = (s: GameState): GameState => step({ ...s, gates: last.gates }, still, this.config).state;
+    let s = last;
+    while (s.tick + 1 <= renderTick) s = advance(s);
+    return renderTick === s.tick ? s : interpolate(s, advance(s), renderTick - s.tick);
   }
 
   /** The paddles as the snapshots have them at `tick`, blended, or held past the ends. */

@@ -48,7 +48,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   gateFraction: 0.8,
   paddleRadius: 0.92,
   paddleFraction: 0.22,
-  paddleSpeed: 1.4,
+  paddleSpeed: 1.05,
   ballRadius: 0.022,
   launchSpeed: 0.85,
   speedUpPerHit: 1.08,
