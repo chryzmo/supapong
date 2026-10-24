@@ -45,8 +45,15 @@ if ! result=$(npx supabase db push --dry-run "${target[@]}" --output-format json
   message=$(node -e '
     try { console.log(JSON.parse(process.argv[1]).error.message); } catch { console.log(process.argv[1]); }
   ' "$result")
+  # GitHub's runners have no IPv6, and the database's direct host is
+  # IPv6-only.  The CLI connects through the IPv4 pooler instead, but only if
+  # the token can read the pooler settings.
+  hint='Check the `SUPABASE_ACCESS_TOKEN` secret and the `SUPABASE_PROJECT_REF` variable in the `production` environment.'
+  if [[ $message == *IPv6* ]]; then
+    hint='The CLI fell back to the IPv6-only direct connection, which means the token couldn'"'"'t read the pooler settings.  Give `SUPABASE_ACCESS_TOKEN` the `database_pooling_config_read` permission (or use a token that has it).'
+  fi
   fail "Couldn't compare migrations with the hosted project: ${message:-no output from the Supabase CLI}" \
-    "$(printf 'The Supabase CLI said:\n\n```\n%s\n```\n\nCheck the `SUPABASE_ACCESS_TOKEN` secret and the `SUPABASE_PROJECT_REF` variable in the `production` environment.\n' "${message:-no output}")"
+    "$(printf 'The Supabase CLI said:\n\n```\n%s\n```\n\n%s\n' "${message:-no output}" "$hint")"
 fi
 
 pending=$(node -e '

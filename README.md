@@ -200,7 +200,7 @@ One-time setup:
 2. **Cloudflare API token.** Under My Profile → API Tokens, create a custom token with the **Account → Cloudflare Pages → Edit** permission.  Your **account ID** is on the Workers & Pages overview.
 3. **GitHub.** In the repository's Settings → Environments, create an environment named `production` and add:
    - secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
-   - secret `SUPABASE_ACCESS_TOKEN`, for the migration check: a Supabase access token (Account → Access Tokens).  A personal token works.  The CLI's help says a scoped one may need `database_write` and `database_pooling_config_read`, because the dry run signs in through a temporary login role;
+   - secret `SUPABASE_ACCESS_TOKEN`, for the migration check: a Supabase access token (Account → Access Tokens).  A scoped token needs `database_write`, because even a dry run signs in through a temporary login role, and `database_pooling_config_read`.  GitHub's runners have no IPv6 and the database's direct host is IPv6-only, so the CLI has to look up the IPv4 pooler.  Without that permission it fails with "IPv6 is not supported on your current network";
    - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TURNSTILE_SITE_KEY` and `SUPABASE_PROJECT_REF`.
 
 The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).  It doesn't apply migrations: run `make db-push` before pushing code that needs them.  If you forget, `make db-check` stops the deploy.
