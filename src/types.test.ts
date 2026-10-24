@@ -119,12 +119,15 @@ describe('parseInputMessage', () => {
   it('accepts a seat and a direction', () => {
     expect(parseInputMessage({ seat: 3, dir: -1 })).toEqual({ seat: 3, dir: -1 });
     expect(parseInputMessage({ seat: 0, dir: 0 })).toEqual({ seat: 0, dir: 0 });
+    expect(parseInputMessage({ seat: 2, dir: 1, paddle: 2.1 })).toEqual({ seat: 2, dir: 1, paddle: 2.1 });
   });
 
   it.each([
     ['a bad direction', { seat: 0, dir: 2 }],
     ['a fractional direction', { seat: 0, dir: 0.5 }],
     ['a bad seat', { seat: 8, dir: 1 }],
+    ['a non-numeric paddle', { seat: 0, dir: 1, paddle: 'left' }],
+    ['a NaN paddle', { seat: 0, dir: 1, paddle: Number.NaN }],
     ['nothing', null],
   ])('rejects %s', (_label, value) => {
     expect(parseInputMessage(value)).toBeNull();
@@ -153,6 +156,14 @@ describe('parseStateMessage', () => {
     expect(parseStateMessage({ ...state, touch: undefined })).toEqual({ ...state, touch: -1 });
   });
 
+  it('treats missing goals (a host on the previous version) as none yet', () => {
+    expect(parseStateMessage({ ...state, goals: undefined })).toEqual({ ...state, goals: 0 });
+  });
+
+  it('keeps the seed when there is one', () => {
+    expect(parseStateMessage({ ...state, seed: 4294967295 })).toEqual({ ...state, seed: 4294967295 });
+  });
+
   it.each([
     ['a short ball', { ...state, ball: [0, 0, 0] }],
     ['a NaN in the ball', { ...state, ball: [0, Number.NaN, 0, 0] }],
@@ -162,7 +173,8 @@ describe('parseStateMessage', () => {
     ['a negative score', { ...state, scores: [1, -1, 2] }],
     ['a fractional tick', { ...state, tick: 1.5 }],
     ['a missing respawn', { ...state, respawn: undefined }],
-    ['missing goals', { ...state, goals: undefined }],
+    ['a fractional seed', { ...state, seed: 1.5 }],
+    ['a seed past 32 bits', { ...state, seed: 2 ** 32 }],
     ['a touch past the last gate', { ...state, touch: 3 }],
     ['a touch below -1', { ...state, touch: -2 }],
   ])('rejects %s', (_label, value) => {

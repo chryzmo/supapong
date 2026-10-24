@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseStateMessage } from '../types';
-import { DEFAULT_CONFIG, DT, createGame, step, type GameState } from './physics';
+import { DEFAULT_CONFIG, DT, createGame, step, type Dir, type GameState } from './physics';
 import { INTERP_DELAY_MS, SnapshotBuffer, decodeState, encodeState } from './snapshot';
 
 const TICK_MS = DT * 1000;
@@ -30,8 +30,8 @@ describe('encodeState / decodeState', () => {
   });
 
   it('stays small', () => {
-    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25, lastTouch: 7 }));
-    expect(json.length).toBeLessThan(260);
+    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25, lastTouch: 7, seed: 4294967295 }));
+    expect(json.length).toBeLessThan(300);
   });
 });
 
@@ -59,6 +59,32 @@ describe('SnapshotBuffer', () => {
     const b = states.find((s) => s.tick === 17)!;
     expect(between.ball.x).toBeGreaterThan(a.ball.x);
     expect(between.ball.x).toBeLessThan(b.ball.x);
+  });
+
+  it('replays the physics between snapshots, so bounces land where the host had them', () => {
+    // A fast ball, long enough for several paddle and wall bounces.
+    const fast = { ...DEFAULT_CONFIG, launchSpeed: 3 };
+    const host: GameState[] = [];
+    let state: GameState = { ...createGame(3, 9, fast), respawnTicks: 0, ball: { x: 0, y: 0, vx: 2.2, vy: 1.1 } };
+    for (let i = 0; i < 600; i++) {
+      state = step(state, [1, -1, 1].map((d) => (Math.floor(i / 40) % 2 ? d : -d)) as Dir[], fast).state;
+      host.push(state);
+    }
+    const buffer = new SnapshotBuffer(fast);
+    const wire = (s: GameState) => decodeState(parseStateMessage(JSON.parse(JSON.stringify(encodeState(s))))!);
+    // Feed snapshots as they'd arrive, and check each host tick as it's drawn.
+    const snapshots = host.filter((s) => s.tick % 3 === 0);
+    let next = 0;
+    let worst = 0;
+    for (const s of host.filter((s) => s.tick > 3 && s.tick < 590 && s.tick % 3 !== 0 && s.respawnTicks === 0)) {
+      const drawAt = arrival(s) + INTERP_DELAY_MS;
+      while (next < snapshots.length && arrival(snapshots[next]!) <= drawAt) buffer.push(wire(snapshots[next]!), arrival(snapshots[next++]!));
+      const drawn = buffer.sample(drawAt)!;
+      worst = Math.max(worst, Math.hypot(drawn.ball.x - s.ball.x, drawn.ball.y - s.ball.y));
+    }
+    // Within rounding of the host (measured: 0.0001).  A straight line
+    // between snapshots is off by 0.1 here, cutting the corner at each bounce.
+    expect(worst).toBeLessThan(0.001);
   });
 
   it('holds the last snapshot instead of extrapolating', () => {

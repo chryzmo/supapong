@@ -47,11 +47,11 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
   const host = isHost ? new HostGame(session, gates, myGate, { config, onGoal, onEnd, ...(start.botSkill !== undefined ? { botSkill: start.botSkill } : {}) }) : undefined;
   const client = isHost
     ? undefined
-    : new ClientGame(gates, myGate, (dir) => session.sendInput({ seat: room.seat, dir }), { config });
+    : new ClientGame(gates, myGate, (dir, paddle) => session.sendInput({ seat: room.seat, dir, paddle }), { config });
   const input = paddleInput((dir) => (host ? host.setOwnInput(dir) : client?.setOwnInput(dir)));
 
   session.listen({
-    input: (message) => host?.applyInput(message.seat, message.dir),
+    input: (message) => host?.applyInput(message.seat, message.dir, message.paddle),
     state: (message) => client?.onState(message),
     playerGone: (playerId) => host?.removePlayer(playerId),
     event(event) {

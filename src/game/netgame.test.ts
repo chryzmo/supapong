@@ -1,7 +1,7 @@
 // HostGame and ClientGame with a fake clock, manual ticking and a fake network.
 import { describe, expect, it } from 'vitest';
 import type { Gate, RoomEvent, StateMessage } from '../types';
-import { ClientGame } from './client';
+import { ClientGame, RESEND_MS } from './client';
 import { COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
 import { DEFAULT_CONFIG, DT, TICK_RATE, gateCenter, paddleTravel, type PhysicsConfig } from './physics';
 
@@ -81,6 +81,16 @@ describe('HostGame', () => {
     expect(paddles[2]).toBeCloseTo(gateCenter(2, 3) + paddleTravel(3, DEFAULT_CONFIG), 3);
   });
 
+  it("puts a guest's paddle where the guest says it is, inside their gate", () => {
+    const { host, states, advance } = hostHarness();
+    host.applyInput(5, 0, gateCenter(2, 3) + 0.1); // Seat 5 is gate 2.
+    advance(50);
+    expect(states.at(-1)!.paddles[2]).toBeCloseTo(gateCenter(2, 3) + 0.1, 3);
+    host.applyInput(5, 0, gateCenter(2, 3) + 3); // Way outside the gate: kept at its edge.
+    advance(50);
+    expect(states.at(-1)!.paddles[2]).toBeCloseTo(gateCenter(2, 3) + paddleTravel(3, DEFAULT_CONFIG), 3);
+  });
+
   it("moves the host's own paddle from local input", () => {
     const { host, states, advance } = hostHarness();
     host.setOwnInput(-1);
@@ -121,8 +131,9 @@ describe('ClientGame', () => {
   function clientHarness() {
     let now = 0;
     const sent: number[] = [];
-    const client = new ClientGame(gates, 1, (dir) => sent.push(dir), { now: () => now });
-    return { client, sent, tick: (ms: number) => ((now += ms), client.view()) };
+    const positions: number[] = [];
+    const client = new ClientGame(gates, 1, (dir, paddle) => (sent.push(dir), positions.push(paddle)), { now: () => now });
+    return { client, sent, positions, tick: (ms: number) => ((now += ms), client.view()) };
   }
 
   it('shows centered paddles before the first snapshot', () => {
@@ -138,6 +149,29 @@ describe('ClientGame', () => {
     client.setOwnInput(0);
     client.setOwnInput(-1);
     expect(sent).toEqual([1, 0, -1]);
+  });
+
+  it('reports where its paddle was when the key changed', () => {
+    const { client, positions, tick } = clientHarness();
+    tick(0);
+    client.setOwnInput(1);
+    tick(100);
+    tick(50);
+    client.setOwnInput(0);
+    // The release reports the paddle 150 ms on, not where the last frame left it.
+    expect(positions.at(-1)).toBeCloseTo(client.predictedPaddle(), 9);
+    expect(positions.at(-1)!).toBeGreaterThan(gateCenter(1, 3));
+  });
+
+  it('resends its position every RESEND_MS while moving, and nothing while still', () => {
+    const { client, sent, tick } = clientHarness();
+    tick(0);
+    client.setOwnInput(1);
+    for (let t = 0; t < 1000; t += 10) tick(10);
+    expect(sent).toHaveLength(1 + 1000 / RESEND_MS);
+    client.setOwnInput(0);
+    for (let t = 0; t < 1000; t += 10) tick(10);
+    expect(sent).toHaveLength(2 + 1000 / RESEND_MS);
   });
 
   it('moves its own paddle immediately, without waiting for the host', () => {

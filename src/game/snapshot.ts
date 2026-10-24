@@ -2,7 +2,7 @@
 // the client for smooth drawing.  Pure apart from the timestamps passed in.
 import type { StateMessage } from '../types';
 import { interpolate } from './interpolate';
-import { DT, type GameState } from './physics';
+import { DEFAULT_CONFIG, DT, step, type Dir, type GameState, type PhysicsConfig } from './physics';
 
 const TICK_MS = DT * 1000;
 
@@ -22,12 +22,17 @@ export function encodeState(state: GameState): StateMessage {
     scores: [...state.scores],
     goals: state.goals,
     touch: state.lastTouch,
+    seed: state.seed,
     respawn: state.respawnTicks,
     rally: state.rally,
   };
 }
 
-/** The client-side view of a snapshot.  The PRNG seed stays with the host. */
+/**
+ * The client-side view of a snapshot.  The seed lets the client replay the
+ * physics between snapshots (see SnapshotBuffer); a host on the previous
+ * version doesn't send one.
+ */
 export function decodeState(message: StateMessage): GameState {
   const [x, y, vx, vy] = message.ball;
   return {
@@ -39,7 +44,7 @@ export function decodeState(message: StateMessage): GameState {
     lastTouch: message.touch,
     respawnTicks: message.respawn,
     rally: message.rally,
-    seed: 0,
+    seed: message.seed ?? 0,
   };
 }
 
@@ -50,14 +55,25 @@ export function decodeState(message: StateMessage): GameState {
  * so arrival time minus tick time gives the offset between the two clocks
  * plus network delay.  We keep the smallest offset seen (the least-delayed
  * arrival), and let it drift up slowly in case the delay really grows.
+ *
+ * Between two snapshots the ball is replayed with the real physics rather
+ * than drawn along a straight line.  Snapshots are 3 ticks apart, and a fast
+ * ball covers several ball widths in that time, so a straight line cut the
+ * corner at every bounce and the ball never visibly reached the paddle or rim.
  */
 export class SnapshotBuffer {
   private snapshots: GameState[] = [];
   private offsetMs: number | undefined;
+  /** False once a snapshot arrives without a seed: those get the straight-line blend. */
+  private replayable = true;
 
-  push(state: GameState, arrivalMs: number): void {
+  constructor(private readonly config: PhysicsConfig = DEFAULT_CONFIG) {}
+
+  /** @param replayable False for a snapshot without the host's seed. */
+  push(state: GameState, arrivalMs: number, replayable = true): void {
     const last = this.snapshots.at(-1);
     if (last && state.tick <= last.tick) return; // Late or duplicate.
+    this.replayable &&= replayable;
     const sample = arrivalMs - state.tick * TICK_MS;
     this.offsetMs =
       this.offsetMs === undefined || sample < this.offsetMs ? sample : this.offsetMs + (sample - this.offsetMs) * 0.05;
@@ -83,8 +99,30 @@ export class SnapshotBuffer {
     for (let i = this.snapshots.length - 1; i > 0; i--) {
       const a = this.snapshots[i - 1]!;
       const b = this.snapshots[i]!;
-      if (a.tick <= renderTick) return interpolate(a, b, (renderTick - a.tick) / (b.tick - a.tick));
+      if (a.tick <= renderTick) {
+        return this.replayable ? this.replay(a, b, renderTick) : interpolate(a, b, (renderTick - a.tick) / (b.tick - a.tick));
+      }
     }
     return first;
+  }
+
+  /**
+   * The state at fractional `renderTick`, between snapshots a and b: step the
+   * physics on from a, with paddles blended between the two snapshots, then
+   * blend the last two ticks.  The final tick blends into b itself, so a
+   * small difference from the host (rounding, a paddle edge) never shows as
+   * a jump when b takes over.
+   */
+  private replay(a: GameState, b: GameState, renderTick: number): GameState {
+    const span = b.tick - a.tick;
+    const still: Dir[] = a.gates.map(() => 0);
+    const advance = (s: GameState): GameState => {
+      const gates = interpolate(a, b, (s.tick + 1 - a.tick) / span).gates;
+      return step({ ...s, gates }, still, this.config).state;
+    };
+    let s = a;
+    while (s.tick + 1 <= renderTick) s = advance(s);
+    const next = s.tick + 1 >= b.tick ? b : advance(s);
+    return interpolate(s, next, renderTick - s.tick);
   }
 }

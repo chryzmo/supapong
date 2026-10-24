@@ -122,10 +122,16 @@ export type RoomEvent =
   | { type: 'goal'; gate: number; scorer?: number }
   | { type: 'end'; scores: number[] };
 
-/** Broadcast `input` (player -> host): sent only when the direction changes. */
+/**
+ * Broadcast `input` (player -> host): sent when the direction changes, and a
+ * few times a second while moving.  `paddle` is where the player has their
+ * paddle on screen; the host adopts it, so its copy doesn't overshoot when a
+ * key is released (see ClientGame).
+ */
 export interface InputMessage {
   seat: number;
   dir: Dir;
+  paddle?: number;
 }
 
 /**
@@ -143,6 +149,8 @@ export interface StateMessage {
   goals: number;
   /** The gate that touched the ball last (and would score), or -1.  Tints the ball. */
   touch: number;
+  /** The host's PRNG state, so clients can replay the physics between snapshots. */
+  seed?: number;
   /** Ticks until the ball launches; 0 while it's in play. */
   respawn: number;
   rally: number;
@@ -226,16 +234,20 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
 
 export function parseInputMessage(value: unknown): InputMessage | null {
   if (!isRecord(value)) return null;
-  const { seat, dir } = value;
+  const { seat, dir, paddle } = value;
   if (!isSeat(seat) || (dir !== -1 && dir !== 0 && dir !== 1)) return null;
-  return { seat, dir };
+  if (paddle === undefined) return { seat, dir };
+  if (typeof paddle !== 'number' || !Number.isFinite(paddle)) return null;
+  return { seat, dir, paddle };
 }
 
 export function parseStateMessage(value: unknown): StateMessage | null {
   if (!isRecord(value)) return null;
-  const { tick, ball, paddles, active, scores, goals, respawn, rally } = value;
-  // A host still on the previous version sends no touch: draw the ball white.
+  const { tick, ball, paddles, active, scores, respawn, rally, seed } = value;
+  // A host still on the previous version sends no goals, touch or seed.
+  const goals = value.goals ?? 0;
   const touch = value.touch ?? -1;
+  if (seed !== undefined && !(isCount(seed) && seed <= 0xffffffff)) return null;
   if (!isCount(tick) || !isCount(goals) || !isCount(respawn) || !isCount(rally)) return null;
   if (!isNumberArray(ball, 4)) return null;
   if (!isNumberArray(paddles) || paddles.length < MIN_PLAYERS || paddles.length > MAX_PLAYERS) return null;
@@ -253,6 +265,7 @@ export function parseStateMessage(value: unknown): StateMessage | null {
     scores: scores.filter(isCount),
     goals,
     touch,
+    ...(seed !== undefined ? { seed } : {}),
     respawn,
     rally,
   };

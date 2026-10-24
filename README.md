@@ -103,16 +103,16 @@ The design is host-authoritative with client-side interpolation.
 - **The host** ([`src/game/host.ts`](src/game/host.ts)) runs [`physics.ts`](src/game/physics.ts) at a fixed 60 Hz and applies everyone's inputs.
   - It broadcasts a snapshot every 3rd tick (20 Hz), plus `goal` and `end` events.
   - Its timer runs in a Web Worker, because browsers throttle timers in background tabs and a hidden host tab would otherwise freeze the match.
-- **Guests** ([`src/game/client.ts`](src/game/client.ts)) buffer snapshots and draw 100 ms in the past, interpolating between the two snapshots around that moment.
+- **Guests** ([`src/game/client.ts`](src/game/client.ts)) buffer snapshots and draw 100 ms in the past.  Between two snapshots they replay the physics from the earlier one, since the ball can cover several ball widths between snapshots and a straight line would cut the corner at every bounce.
   - Host time is estimated from the least-delayed arrival, so jitter doesn't shake the picture.
-  - A guest's own paddle is predicted locally: it moves the moment a key is pressed, and eases to the host's position once the player stops.
+  - A guest's own paddle is predicted locally: it moves the moment a key is pressed.  Inputs carry the paddle's position, and the host adopts it, so the host's copy stops where the player stopped.
 - **Physics** is pure and deterministic: no DOM, no clocks, and seeded randomness carried in the state.
   - Collisions are found by solving exactly when the ball crosses the paddle and rim circles, so a fast ball can't skip through a paddle between ticks.
 
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
-| `input` | guest → host, on `room:{id}:input` | on change only | `{ seat, dir }`, where `dir` is -1, 0 or 1 |
-| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
+| `input` | guest → host, on `room:{id}:input` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
+| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, seed, respawn, rally }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
 | `event` | host → all | rare | `start` (gate order), `goal`, `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.

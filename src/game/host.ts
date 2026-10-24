@@ -15,6 +15,7 @@ import {
   TICK_RATE,
   createGame,
   isOver,
+  movePaddle,
   setGateActive,
   step,
   type Dir,
@@ -92,10 +93,19 @@ export class HostGame {
     if (this.myGate >= 0) this.inputs[this.myGate] = dir;
   }
 
-  /** A player's input, by seat. */
-  applyInput(seat: number, dir: Dir): void {
+  /**
+   * A player's input, by seat.  If it says where their paddle is, take their
+   * word for it (kept inside their gate): the player's screen is the truth
+   * for their own paddle, and the host's copy would otherwise run on past
+   * where they stopped by however long the message took.
+   */
+  applyInput(seat: number, dir: Dir, paddle?: number): void {
     const gate = this.gates.findIndex((g) => g.seat === seat);
-    if (gate !== -1 && gate !== this.myGate && !this.gates[gate]!.bot) this.inputs[gate] = dir;
+    if (gate === -1 || gate === this.myGate || this.gates[gate]!.bot) return;
+    this.inputs[gate] = dir;
+    if (paddle === undefined || !this.state.gates[gate]?.active) return;
+    const placed = movePaddle(paddle, gate, this.gates.length, 0, 0, this.config);
+    this.state = { ...this.state, gates: this.state.gates.map((g, i) => (i === gate ? { ...g, paddle: placed } : g)) };
   }
 
   /** A player left for good: their gate becomes wall. */

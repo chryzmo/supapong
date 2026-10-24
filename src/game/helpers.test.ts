@@ -92,9 +92,12 @@ describe('interpolate', () => {
     expect(interpolate(a, b, -1).ball.x).toBeCloseTo(0);
   });
 
-  it("doesn't blend the ball across a goal", () => {
+  it("doesn't blend the ball across a goal: it stays put until the goal tick", () => {
     const scored: GameState = { ...b, respawnTicks: 30, ball: { x: 0, y: 0, vx: 0, vy: 0 } };
-    expect(interpolate({ ...a, ball: { x: 0.9, y: 0, vx: 1, vy: 0 } }, scored, 0.5).ball).toEqual(scored.ball);
+    const before = { ...a, ball: { x: 0.9, y: 0, vx: 1, vy: 0 } };
+    expect(interpolate(before, scored, 0.5).ball).toEqual(before.ball);
+    expect(interpolate(before, scored, 0.5).respawnTicks).toBe(0);
+    expect(interpolate(before, scored, 1).ball).toEqual(scored.ball);
   });
 
   it('blends paddles the short way across ±π', () => {
