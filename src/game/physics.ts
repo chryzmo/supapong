@@ -185,6 +185,18 @@ export function ballSpeed(ball: Ball): number {
 // Step ---------------------------------------------------------------------------
 
 /**
+ * Moves a paddle for `dt` seconds and keeps it inside its gate.  Shared by
+ * step() and by clients predicting their own paddle between snapshots.
+ */
+export function movePaddle(paddle: number, gate: number, gateCount: number, dir: Dir, dt: number, config: PhysicsConfig): number {
+  const center = gateCenter(gate, gateCount);
+  const travel = paddleTravel(gateCount, config);
+  const speed = config.paddleSpeed * 2 * gateHalfWidth(gateCount, config);
+  const offset = angleDiff(paddle, center) + dir * speed * dt;
+  return wrapAngle(center + Math.max(-travel, Math.min(travel, offset)));
+}
+
+/**
  * Advances the game one tick.
  * @param inputs Paddle direction per gate; +1 is counterclockwise.  Missing entries count as 0.
  */
@@ -192,15 +204,9 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   const events: PhysicsEvent[] = [];
   const n = state.gates.length;
 
-  // Paddles.
-  const travel = paddleTravel(n, config);
-  const speed = config.paddleSpeed * 2 * gateHalfWidth(n, config);
-  const gates = state.gates.map((gate, i) => {
-    if (!gate.active) return gate;
-    const center = gateCenter(i, n);
-    const offset = angleDiff(gate.paddle, center) + (inputs[i] ?? 0) * speed * DT;
-    return { active: true, paddle: wrapAngle(center + Math.max(-travel, Math.min(travel, offset))) };
-  });
+  const gates = state.gates.map((gate, i) =>
+    gate.active ? { active: true, paddle: movePaddle(gate.paddle, i, n, inputs[i] ?? 0, DT, config) } : gate,
+  );
 
   let next: GameState = { ...state, tick: state.tick + 1, gates };
 

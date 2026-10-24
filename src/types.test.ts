@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DISPLAY_NAME_MAX,
   ROOM_NAME_MAX,
+  parseInputMessage,
   parseRoomEvent,
   parseRosterEntry,
+  parseStateMessage,
   validateDisplayName,
   validateRoomName,
 } from './types';
@@ -64,6 +66,14 @@ describe('parseRoomEvent', () => {
     { seat: 2, playerId: 'b', displayName: 'Bob' },
   ];
 
+  it('accepts goal and end', () => {
+    expect(parseRoomEvent({ type: 'goal', gate: 2 })).toEqual({ type: 'goal', gate: 2 });
+    expect(parseRoomEvent({ type: 'end', scores: [3, 0, 10] })).toEqual({ type: 'end', scores: [3, 0, 10] });
+    expect(parseRoomEvent({ type: 'goal', gate: 9 })).toBeNull();
+    expect(parseRoomEvent({ type: 'end', scores: [3, -1] })).toBeNull();
+    expect(parseRoomEvent({ type: 'end', scores: [3] })).toBeNull();
+  });
+
   it('accepts start, closed and removed', () => {
     expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
@@ -82,5 +92,50 @@ describe('parseRoomEvent', () => {
     ['a string', 'start'],
   ])('rejects %s', (_label, value) => {
     expect(parseRoomEvent(value)).toBeNull();
+  });
+});
+
+describe('parseInputMessage', () => {
+  it('accepts a seat and a direction', () => {
+    expect(parseInputMessage({ seat: 3, dir: -1 })).toEqual({ seat: 3, dir: -1 });
+    expect(parseInputMessage({ seat: 0, dir: 0 })).toEqual({ seat: 0, dir: 0 });
+  });
+
+  it.each([
+    ['a bad direction', { seat: 0, dir: 2 }],
+    ['a fractional direction', { seat: 0, dir: 0.5 }],
+    ['a bad seat', { seat: 8, dir: 1 }],
+    ['nothing', null],
+  ])('rejects %s', (_label, value) => {
+    expect(parseInputMessage(value)).toBeNull();
+  });
+});
+
+describe('parseStateMessage', () => {
+  const state = {
+    tick: 30,
+    ball: [0.1, -0.2, 0.5, 0.3],
+    paddles: [0, 2.09, -2.09],
+    active: [true, true, false],
+    scores: [1, 0, 2],
+    respawn: 0,
+    rally: 4,
+  };
+
+  it('accepts a valid snapshot', () => {
+    expect(parseStateMessage(state)).toEqual(state);
+  });
+
+  it.each([
+    ['a short ball', { ...state, ball: [0, 0, 0] }],
+    ['a NaN in the ball', { ...state, ball: [0, Number.NaN, 0, 0] }],
+    ['one gate', { ...state, paddles: [0], active: [true], scores: [0] }],
+    ['mismatched lengths', { ...state, active: [true, true] }],
+    ['non-boolean active', { ...state, active: [1, 1, 0] }],
+    ['a negative score', { ...state, scores: [1, -1, 2] }],
+    ['a fractional tick', { ...state, tick: 1.5 }],
+    ['a missing respawn', { ...state, respawn: undefined }],
+  ])('rejects %s', (_label, value) => {
+    expect(parseStateMessage(value)).toBeNull();
   });
 });

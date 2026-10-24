@@ -1,4 +1,5 @@
 // Shared app types, plus parsers for messages that arrive over Realtime.
+import type { Dir } from './game/physics';
 
 export const DISPLAY_NAME_MAX = 24;
 export const ROOM_NAME_MAX = 32;
@@ -70,7 +71,31 @@ export interface Gate {
 export type RoomEvent =
   | { type: 'start'; gates: Gate[] }
   | { type: 'closed' }
-  | { type: 'removed'; playerId: string };
+  | { type: 'removed'; playerId: string }
+  | { type: 'goal'; gate: number }
+  | { type: 'end'; scores: number[] };
+
+/** Broadcast `input` (player -> host): sent only when the direction changes. */
+export interface InputMessage {
+  seat: number;
+  dir: Dir;
+}
+
+/**
+ * Broadcast `state` (host -> all, ~20 Hz).  Arrays are per gate, in gate
+ * order.  Numbers are rounded before sending to keep the payload small.
+ */
+export interface StateMessage {
+  tick: number;
+  /** x, y, vx, vy */
+  ball: [number, number, number, number];
+  paddles: number[];
+  active: boolean[];
+  scores: number[];
+  /** Ticks until the ball launches; 0 while it's in play. */
+  respawn: number;
+  rally: number;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -82,6 +107,18 @@ function isSeat(value: unknown): value is number {
 
 function isName(value: unknown): value is string {
   return typeof value === 'string' && value.length >= 1 && value.length <= DISPLAY_NAME_MAX;
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isInteger(value) && typeof value === 'number' && value >= 0;
+}
+
+function isNumberArray(value: unknown, length?: number): value is number[] {
+  return (
+    Array.isArray(value) &&
+    (length === undefined || value.length === length) &&
+    value.every((v) => typeof v === 'number' && Number.isFinite(v))
+  );
 }
 
 function isId(value: unknown): value is string {
@@ -116,7 +153,43 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       return { type: 'closed' };
     case 'removed':
       return isId(value.playerId) ? { type: 'removed', playerId: value.playerId } : null;
+    case 'goal':
+      return isSeat(value.gate) ? { type: 'goal', gate: value.gate } : null;
+    case 'end': {
+      const scores: unknown = value.scores;
+      if (!Array.isArray(scores) || scores.length < MIN_PLAYERS || scores.length > MAX_PLAYERS) return null;
+      return scores.every(isCount) ? { type: 'end', scores: scores.filter(isCount) } : null;
+    }
     default:
       return null;
   }
+}
+
+export function parseInputMessage(value: unknown): InputMessage | null {
+  if (!isRecord(value)) return null;
+  const { seat, dir } = value;
+  if (!isSeat(seat) || (dir !== -1 && dir !== 0 && dir !== 1)) return null;
+  return { seat, dir };
+}
+
+export function parseStateMessage(value: unknown): StateMessage | null {
+  if (!isRecord(value)) return null;
+  const { tick, ball, paddles, active, scores, respawn, rally } = value;
+  if (!isCount(tick) || !isCount(respawn) || !isCount(rally)) return null;
+  if (!isNumberArray(ball, 4)) return null;
+  if (!isNumberArray(paddles) || paddles.length < MIN_PLAYERS || paddles.length > MAX_PLAYERS) return null;
+  const n = paddles.length;
+  if (!Array.isArray(active) || active.length !== n || !active.every((a) => typeof a === 'boolean')) return null;
+  if (!Array.isArray(scores) || scores.length !== n || !scores.every(isCount)) return null;
+  const [x, y, vx, vy] = ball;
+  if (x === undefined || y === undefined || vx === undefined || vy === undefined) return null;
+  return {
+    tick,
+    ball: [x, y, vx, vy],
+    paddles,
+    active: active.filter((a): a is boolean => typeof a === 'boolean'),
+    scores: scores.filter(isCount),
+    respawn,
+    rally,
+  };
 }
