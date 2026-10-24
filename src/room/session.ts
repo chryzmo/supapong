@@ -35,7 +35,7 @@ import {
   type SeatedRoom,
   type StateMessage,
 } from '../types';
-import { deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setRoomStatus } from './api';
+import { confirmResult, deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setRoomStatus } from './api';
 import { lineup } from './lineup';
 import { AbsenceTracker, rosterFromPresence, staleSeats } from './presence';
 
@@ -85,6 +85,7 @@ export class RoomSession {
   private subscribedBefore = false;
   private phase: 'waiting' | 'playing' | 'finished' = 'waiting';
   private saving: Promise<void> | undefined;
+  private confirming: Promise<void> | undefined;
   private ended = false;
 
   constructor(
@@ -206,6 +207,16 @@ export class RoomSession {
       throw err;
     });
     return this.saving;
+  }
+
+  /**
+   * Guests only.  Reports the scores this player saw (see confirm_result),
+   * once: the database keeps a player's first report.
+   */
+  confirmResult(scores: Record<string, number>): Promise<void> {
+    if (this.isHost) return Promise.reject(new Error('The host records the result; guests confirm it.'));
+    this.confirming ??= confirmResult(this.client, this.room.id, scores);
+    return this.confirming;
   }
 
   /**

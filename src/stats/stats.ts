@@ -69,6 +69,7 @@ export function statsScreen(player: Player, actions: StatsActions): View {
         h('span', { className: 'muted' }, `${timeAgo(match.finishedAt, now)} · ${match.players.length} players`),
         lineup,
       ),
+      ...(match.ranked ? [] : [h('span', { className: 'tag', title: 'Not enough players confirmed this result, so it doesn’t count toward the leaderboard.' }, 'unconfirmed')]),
       ...(me ? [h('span', { className: me.won ? 'tag you' : 'tag' }, `you: ${ordinal(me.place)}`)] : []),
     );
   }
@@ -105,7 +106,7 @@ export function statsScreen(player: Player, actions: StatsActions): View {
       { className: 'panel' },
       h('div', { className: 'header' }, h('h1', {}, 'Leaderboard'), back),
       board,
-      h('p', { className: 'muted' }, 'Ranked by wins, then points.  Sharing first place counts as a win; a match where everyone ties has no winner.'),
+      h('p', { className: 'muted' }, 'Ranked by wins, then points, from matches most players confirmed.  Sharing first place counts as a win; a match where everyone ties has no winner.'),
       h('div', { className: 'header' }, h('h2', {}, 'Recent matches'), h('div', { className: 'row toggle' }, allButton, mineButton)),
       history,
       status,

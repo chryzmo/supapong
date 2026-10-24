@@ -67,12 +67,22 @@ match_results (
   scores jsonb not null,      -- { player_id: points }
   room_name text,             -- copied at finish, so history outlives the room
   names jsonb not null,       -- { player_id: display_name }, copied at finish
-  finished_at timestamptz default now()
+  finished_at timestamptz default now(),
+  confirmed_by uuid[] not null default '{}',  -- guests who reported the same scores
+  ranked boolean not null default false       -- counts toward the leaderboard
+)
+
+result_confirmations (        -- what each guest was shown; private
+  room_id uuid references rooms on delete cascade,
+  player_id uuid references profiles on delete cascade,
+  scores jsonb not null,
+  created_at timestamptz default now(),
+  primary key (room_id, player_id)
 )
 ```
 
 - Put a view or RPC called `lobby_rooms` on top of these.  It returns rooms where `status = 'waiting'` along with `player_count`, `max_players` and `goal_limit`, so the lobby can show "x/y" and the match length.
-- Two views (`security_invoker`) serve stats.  `match_players` has one row per player per match: `place` (rank, ties shared) and `won` (first place, shared counts, in a match where not everyone tied).  `leaderboard` totals it per player: `matches`, `wins`, `points`, `rank` (by wins, then points).  Names come from the result, so they survive cleanup, and the leaderboard prefers the player's current name.
+- Two views (`security_invoker`) serve stats.  `match_players` has one row per player per match: `place` (rank, ties shared), `won` (first place, shared counts, in a match where not everyone tied) and the result's `ranked`.  `leaderboard` totals ranked results per player: `matches`, `wins`, `points`, `rank` (by wins, then points).  Names come from the result, so they survive cleanup, and the leaderboard prefers the player's current name.
 - Joining happens through a `join_room(room_id)` RPC (`security definer`).  It checks capacity and status, assigns the lowest free seat, and does it all in one transaction so two players can't take the same seat.
 
 ### RLS
@@ -81,6 +91,7 @@ match_results (
 - `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`, `status = 'waiting'`, and `started_at` and `starting_players` left empty, so a room can only start through `set_room_status`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.  Going to `playing` records `started_at` and `starting_players`.
 - `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players, goal_limit = 10)`, which creates the room and seats the host in one transaction.
 - `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result (with the room name and players' names from `profiles`) and sets the room to `finished`, all in one transaction.  The scores must be plausible: only for `starting_players`, adding up to no more than `goal_limit`, and no sooner than the match could have lasted (3 s of countdown plus 1 s per point since `started_at`).
+- **Confirmations:** at the end of a match, each guest's client calls `confirm_result(room_id, scores)` (`security definer`) with the scores it was shown.  Only players in `starting_players` other than the host may, once the match has started, and a player's first report stands.  Reports go in `result_confirmations`, which has RLS on and no grants: nobody reads them directly.  A result is `ranked` once more than half its players, counting the host, reported the same scores.  `refresh_ranking(room_id)` (internal, not granted) recounts after every confirmation and after `finish_match`, because either can come first, and stores the outcome on the result so it outlives the room.
 
 ### Realtime
 
@@ -126,7 +137,7 @@ match_results (
 - **Board view:** each player sees the board rotated so their own gate is at the bottom.  Then everyone defends "down", and Left/Right on the keyboard move the paddle left/right on screen.  In world terms, +1 is counterclockwise, which is screen-right at the bottom.  Spectators and the sandbox without a seat get no rotation.
 - **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  The ball takes the color of the last paddle to touch it, the player who'd score, and is white before anyone has.  A gate flashes when it concedes, and the scorer's paddle glows.  Names (cut to 10 characters) and scores sit outside the rim, upright.
 - **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.  On a mobile browser (`isMobileBrowser` in `touch.ts`: Client Hints, then the user agent including iPads posing as Macs, then a touch-only primary pointer), two hold-to-move buttons, ◀ and ▶, sit under the board, or either side of it on a phone held sideways.  They hold pseudo-keys in the same `PaddleInput` as the keyboard.  Spectators get none.  `?touch=1` or `?touch=0` forces them on or off.
-- **Leaderboard:** the lobby's Leaderboard button opens the top 10 players (plus your own row if you're further down) and the 10 latest matches, with an All / Mine toggle.
+- **Leaderboard:** the lobby's Leaderboard button opens the top 10 players (plus your own row if you're further down) and the 10 latest matches, with an All / Mine toggle.  Matches too few players confirmed are tagged "unconfirmed" and left out of the standings.
 - **Practice:** the sandbox is at `/#sandbox` (no sign-in needed) and behind the lobby's Practice button.  Its "Copy config" button copies the tuned physics settings as JSON for pasting into `DEFAULT_CONFIG`.
 
 ## Project layout

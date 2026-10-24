@@ -40,7 +40,9 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     const state = host ? host.view() : client!.view();
     const result: MatchResult = { gates, scores, active: state.gates.map((g) => g.active) };
     // The host saves straight away; the results screen shows how it went.
+    // Guests vouch for what they saw, so the result can count (confirm_result).
     if (isHost) session.finishMatch(scoresByPlayer(result)).catch(() => {});
+    else session.confirmResult(scoresByPlayer(result)).catch(() => {});
     resultsTimer = setTimeout(() => actions.ended(result), RESULTS_DELAY_MS);
   };
 

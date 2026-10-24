@@ -34,7 +34,7 @@ export function groupMatches(ids: string[], rows: MatchPlayerRow[]): MatchSummar
     if (!row.player_id) continue;
     let match = byId.get(row.result_id);
     if (!match) {
-      match = { id: row.result_id, finishedAt: new Date(row.finished_at), roomName: row.room_name, players: [] };
+      match = { id: row.result_id, finishedAt: new Date(row.finished_at), roomName: row.room_name, players: [], ranked: row.ranked };
       byId.set(row.result_id, match);
     }
     match.players.push({

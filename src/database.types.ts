@@ -25,14 +25,14 @@ export type Database = {
           Tables: {
             "match_results": {
                   Row: {
-                    "finished_at": string,"id": string,"names": NonNullable<Json>,"room_id": string | null,"room_name": string | null,"scores": NonNullable<Json>
+                    "confirmed_by": (string)[],"finished_at": string,"id": string,"names": NonNullable<Json>,"ranked": boolean,"room_id": string | null,"room_name": string | null,"scores": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"room_id"?: string | null,"room_name"?: string | null,"scores": NonNullable<Json>
+                    "confirmed_by"?: (string)[],"finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"ranked"?: boolean,"room_id"?: string | null,"room_name"?: string | null,"scores": NonNullable<Json>
                   }
                   Update: {
-                    "finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"room_id"?: string | null,"room_name"?: string | null,"scores"?: NonNullable<Json>
+                    "confirmed_by"?: (string)[],"finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"ranked"?: boolean,"room_id"?: string | null,"room_name"?: string | null,"scores"?: NonNullable<Json>
                   }
                   Relationships: [
                     {
@@ -62,6 +62,38 @@ isOneToOne: true
                   }
                   Relationships: [
                     
+                  ]
+                },"result_confirmations": {
+                  Row: {
+                    "created_at": string,"player_id": string,"room_id": string,"scores": NonNullable<Json>
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"player_id": string,"room_id": string,"scores": NonNullable<Json>
+                  }
+                  Update: {
+                    "created_at"?: string,"player_id"?: string,"room_id"?: string,"scores"?: NonNullable<Json>
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "result_confirmations_player_id_fkey"
+      columns: ["player_id"]
+isOneToOne: false
+      referencedRelation: "profiles"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "result_confirmations_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "lobby_rooms"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "result_confirmations_room_id_fkey"
+      columns: ["room_id"]
+isOneToOne: false
+      referencedRelation: "rooms"
+      referencedColumns: ["id"]
+    }
                   ]
                 },"room_players": {
                   Row: {
@@ -142,7 +174,7 @@ isOneToOne: false
                   ]
                 },"match_players": {
                   Row: {
-                    "display_name": string | null,"finished_at": string,"place": number | null,"player_count": number | null,"player_id": string | null,"result_id": string,"room_name": string | null,"score": number | null,"won": boolean | null
+                    "display_name": string | null,"finished_at": string,"place": number | null,"player_count": number | null,"player_id": string | null,"ranked": boolean,"result_id": string,"room_name": string | null,"score": number | null,"won": boolean | null
                   }
                   ComputedFields: never
                   Relationships: [
@@ -154,6 +186,9 @@ isOneToOne: false
             "cleanup":
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
+"confirm_result":
+{ Args: { "p_room_id": string,"p_scores": Json }; Returns: undefined
+                           },
 "create_room":
 { Args: { "p_goal_limit"?: number,"p_max_players": number,"p_name": string }; Returns: string
                            },
@@ -162,6 +197,9 @@ isOneToOne: false
                            },
 "join_room":
 { Args: { "p_room_id": string }; Returns: number
+                           },
+"refresh_ranking":
+{ Args: { "p_room_id": string }; Returns: undefined
                            },
 "set_room_status":
 { Args: { "p_room_id": string,"p_status": string }; Returns: undefined

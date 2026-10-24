@@ -54,6 +54,8 @@ export interface MatchSummary {
   roomName: string | null;
   /** Best place first. */
   players: MatchPlayer[];
+  /** Counts toward the leaderboard: most players confirmed the result. */
+  ranked: boolean;
 }
 
 export interface MatchPlayer {

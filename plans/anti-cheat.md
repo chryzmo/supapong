@@ -45,6 +45,8 @@ Closes cheats 2 and 5, and makes 1 harder.
 
 ### Phase 1: guests confirm the result (no Edge Functions)
 
+Done: migration `20261025000000_result_confirmations.sql`.  Confirmations live in their own table keyed by room, because a guest's report can arrive before the host's result.  Whichever comes second settles `ranked`.  Results from before this migration were kept as ranked.
+
 Closes cheat 1 for matches with an honest guest.
 
 - At `end`, each guest's client calls `confirm_result(result_id, scores)` with the scores it saw.  It already has them, in its own copy of the official snapshots.

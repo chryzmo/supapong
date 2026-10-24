@@ -12,6 +12,7 @@ function row(result: string, player: string, score: number, place: number, won =
     place,
     won,
     player_count: 2,
+    ranked: true,
   };
 }
 
@@ -31,6 +32,11 @@ describe('groupMatches', () => {
       [1, 'B'],
       [3, 'C'],
     ]);
+  });
+
+  it('says whether each match counts toward the leaderboard', () => {
+    const matches = groupMatches(['m1', 'm2'], [row('m1', 'a', 3, 1), { ...row('m2', 'a', 1, 1), ranked: false }]);
+    expect(matches.map((m) => m.ranked)).toEqual([true, false]);
   });
 
   it('skips ids with no rows and rows with no player', () => {

@@ -48,7 +48,7 @@ export async function fetchRecentMatches(options: { playerId?: string; limit?: n
 
   const { data, error } = await supabase
     .from('match_players')
-    .select('result_id, finished_at, room_name, player_id, display_name, score, place, won, player_count')
+    .select('result_id, finished_at, room_name, player_id, display_name, score, place, won, player_count, ranked')
     .in('result_id', ids);
   if (error) throw error;
   return groupMatches(ids, data);

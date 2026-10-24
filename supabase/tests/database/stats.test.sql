@@ -28,12 +28,15 @@ create function pg_temp.backdate(p_room uuid) returns void language sql security
   update public.rooms set started_at = started_at - interval '10 minutes' where id = p_room;
 $$;
 -- Plays a match through the real RPCs: the first player (by id) hosts, the
--- rest join, and the host records p_scores ({ letter: points }).
+-- rest join, the host records p_scores ({ letter: points }), and the rest
+-- confirm it.
 create function pg_temp.play(p_room text, p_scores jsonb) returns uuid language plpgsql as $$
 declare
   v_letters text[] := array(select k from jsonb_object_keys(p_scores) k order by k);
   v_room uuid;
   v_letter text;
+  v_result uuid;
+  v_scores jsonb := (select jsonb_object_agg(pg_temp.id(key), value) from jsonb_each(p_scores));
 begin
   perform pg_temp.login(pg_temp.id(v_letters[1]));
   v_room := public.create_room(p_room, 8);
@@ -44,9 +47,13 @@ begin
   perform pg_temp.login(pg_temp.id(v_letters[1]));
   perform public.set_room_status(v_room, 'playing');
   perform pg_temp.backdate(v_room);
-  return public.finish_match(v_room, (
-    select jsonb_object_agg(pg_temp.id(key), value) from jsonb_each(p_scores)
-  ));
+  v_result := public.finish_match(v_room, v_scores);
+  -- Everyone confirms, so every match here is ranked.
+  foreach v_letter in array v_letters[2:] loop
+    perform pg_temp.login(pg_temp.id(v_letter));
+    perform public.confirm_result(v_room, v_scores);
+  end loop;
+  return v_result;
 end;
 $$;
 -- One player's row in one match, as "place won score", e.g. "1 t 5".

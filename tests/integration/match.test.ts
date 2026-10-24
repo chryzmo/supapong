@@ -165,7 +165,7 @@ it('announces every goal and the final score', async () => {
   }
 });
 
-it('records the result once, finishes the room, and lets guests read it', async () => {
+it('records the result once, finishes the room, and ranks it once guests confirm', async () => {
   const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 5, goalLimit: 99 };
   const { host, hostSession, guests, gates, roomId } = await startMatch(2, config);
   await waitFor(() => host.isOver(), 'the match to end', 12_000);
@@ -176,8 +176,19 @@ it('records the result once, finishes the room, and lets guests read it', async 
   await Promise.all([hostSession.finishMatch(scores), hostSession.finishMatch(scores)]);
 
   const guest = guests[0]!.player.client;
-  const { data: results } = await guest.from('match_results').select('scores').eq('room_id', roomId);
-  expect(results).toEqual([{ scores }]);
+  const { data: results } = await guest.from('match_results').select('scores, ranked').eq('room_id', roomId);
+  expect(results).toEqual([{ scores, ranked: false }]);
+
+  // Each guest vouches for the scores the host showed them, and that ranks it.
+  for (const { session, events } of guests) {
+    await waitFor(() => events.some((e) => e.type === 'end'), 'the end event');
+    const end = events.find((e) => e.type === 'end');
+    if (end?.type !== 'end') throw new Error('No end event.');
+    await session.confirmResult(scoresByPlayer({ gates, scores: end.scores, active: state.gates.map((g) => g.active) }));
+  }
+  const { data: confirmed } = await guest.from('match_results').select('ranked, confirmed_by').eq('room_id', roomId).single();
+  expect(confirmed?.ranked).toBe(true);
+  expect(confirmed?.confirmed_by).toHaveLength(2);
   const { data: room } = await guest.from('rooms').select('status').eq('id', roomId).single();
   expect(room?.status).toBe('finished');
 });

@@ -36,6 +36,15 @@ export async function deleteRoom(client: AppClient, roomId: string): Promise<voi
   if (error) throw error;
 }
 
+/**
+ * Guests only (checked in confirm_result): reports the scores this player was
+ * shown.  The result only counts toward the leaderboard once most players agree.
+ */
+export async function confirmResult(client: AppClient, roomId: string, scores: Record<string, number>): Promise<void> {
+  const { error } = await client.rpc('confirm_result', { p_room_id: roomId, p_scores: scores });
+  if (error) throw error;
+}
+
 /** Host only (checked in finish_match): records the result and finishes the room, in one transaction. */
 export async function finishMatch(client: AppClient, roomId: string, scores: Record<string, number>): Promise<void> {
   const { error } = await client.rpc('finish_match', { p_room_id: roomId, p_scores: scores });

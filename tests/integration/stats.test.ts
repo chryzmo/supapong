@@ -3,7 +3,7 @@
 // this file's players and matches.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createRoom, joinRoom } from '../../src/lobby/api';
-import { finishMatch, setRoomStatus } from '../../src/room/api';
+import { confirmResult, finishMatch, setRoomStatus } from '../../src/room/api';
 import { fetchLeaderboard, fetchRecentMatches, fetchStanding } from '../../src/stats/api';
 import { actAs, backdateStart, createPlayer, type TestPlayer } from './helpers';
 
@@ -13,8 +13,8 @@ let ada: TestPlayer;
 let bob: TestPlayer;
 let cy: TestPlayer;
 
-/** Plays a match through the real RPCs, hosted by the first player. */
-async function play(roomName: string, scores: [TestPlayer, number][]): Promise<void> {
+/** Plays a match through the real RPCs, hosted by the first player and confirmed by the rest. */
+async function play(roomName: string, scores: [TestPlayer, number][], confirm = true): Promise<void> {
   const [host, ...guests] = scores.map(([player]) => player);
   actAs(host!);
   const roomId = await createRoom(roomName, 4);
@@ -24,7 +24,10 @@ async function play(roomName: string, scores: [TestPlayer, number][]): Promise<v
   }
   await setRoomStatus(host!.client, roomId, 'playing');
   await backdateStart(roomId); // finish_match refuses a match quicker than its points could take.
-  await finishMatch(host!.client, roomId, Object.fromEntries(scores.map(([player, points]) => [player.id, points])));
+  const result = Object.fromEntries(scores.map(([player, points]) => [player.id, points]));
+  await finishMatch(host!.client, roomId, result);
+  // Everyone confirms, so the leaderboard counts it.
+  if (confirm) for (const guest of guests) await confirmResult(guest.client, roomId, result);
 }
 
 beforeAll(async () => {
@@ -97,5 +100,20 @@ describe('fetchRecentMatches', () => {
     actAs(ada);
     const matches = await fetchRecentMatches({ limit: 2 });
     expect(matches.map((m) => m.roomName)).toEqual(['Rematch', 'Opening']);
+  });
+});
+
+// Last, so the matches above stay the latest while their tests run.
+describe('unconfirmed matches', () => {
+  it('show in history, tagged, but not on the leaderboard', async () => {
+    const [dee, eve] = await Promise.all([createPlayer('Dee'), createPlayer('Eve')]);
+    await play('Unconfirmed', [
+      [dee, 5],
+      [eve, 1],
+    ], false);
+    actAs(eve);
+    const [match] = await fetchRecentMatches({ playerId: dee.id });
+    expect(match).toEqual(expect.objectContaining({ roomName: 'Unconfirmed', ranked: false }));
+    expect(await fetchStanding(dee.id)).toBeNull();
   });
 });
