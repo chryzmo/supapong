@@ -21,7 +21,7 @@ make dev                   # http://127.0.0.1:5173
 
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
-- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  Move with ← → or A D.
+- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
 ## How it fits together
@@ -84,6 +84,7 @@ sequenceDiagram
 | Two players must never get the same seat | **RPC** `join_room` (`security definer`) | Choosing the lowest free seat is a read followed by a write.  From the client, two joins could read the same free seat.  The RPC locks the room row (`for update`), so joins to one room happen one at a time.  An integration test fires 12 joins at an 8-seat room at once. | [`lobby_rpcs.sql`](supabase/migrations/20261023225909_lobby_rpcs.sql) |
 | Writes that must happen together, or need checks RLS can't express | **RPCs** `create_room`, `set_room_status`, `finish_match` | `create_room` seats the host in the same transaction, so the lobby never shows an empty room.  RLS can't limit an update to one column or check a status transition, so status changes go through `set_room_status` (host only, forward only).  `finish_match` writes the result and the finished status together, and validates the scores. | same |
 | "3/4 players" in the lobby | **View** `lobby_rooms` with `security_invoker` | One round trip for the join and count, queried like a table.  `security_invoker` makes it run with the caller's permissions.  Without it, a view runs as its owner and silently bypasses RLS. | same |
+| Leaderboard and match history | **Views** `match_players` and `leaderboard` (`security_invoker`) | Scores are stored as one jsonb object per match, the right shape for writing a result in one go.  `match_players` unpacks it into one row per player per match and ranks each match with `rank()`; `leaderboard` totals that per player.  The client queries both like tables, with no stats code of its own.  `finish_match` copies the room and player names into the result, so history still reads right after cleanup deletes the room and the players. | [`match_stats.sql`](supabase/migrations/20261024030000_match_stats.sql) |
 | Lobby updates live | **Realtime Postgres Changes** | Room lists change rarely, so "tell me something changed and I'll refetch" is simple and cheap.  For inserts and updates, Realtime checks RLS before delivering the change.  Deletes always go through, but carry only the key.  The channel uses `postgres_changes_options: { wait: true }`, so the first refetch happens only once changes are flowing.  Without it, changes made just after subscribing could be missed. | [`src/lobby/api.ts`](src/lobby/api.ts) |
 | Who is actually connected | **Realtime Presence** | The database knows who holds a seat, not who is online.  Presence is tied to the socket, so a closed tab or a dropped network shows up as a leave, with no heartbeat code of ours. | [`src/room/session.ts`](src/room/session.ts) |
 | Game traffic: inputs, snapshots, room events | **Realtime Broadcast** | These only matter to people connected right now, so writing them to a table would be wasted work.  Broadcast sends them straight to the other sockets on the channel. | same, and [`src/game/`](src/game/) |
@@ -161,7 +162,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
   - pagination and filters;
   - possibly a separate "open rooms" table.
 - **Message budget.** Each match sends 20 snapshots a second to every guest, plus inputs.  Realtime quotas count messages, so cost grows with matches × players.  Lower snapshot rates, sending only what changed, or binary payloads are the next levers.
-- **Results become features.** `match_results` already keys scores by player id, so leaderboards and per-player history are views on top of it.
+- **Stats get stored, not recomputed.** The `leaderboard` and `match_players` views recompute from every result on each read.  With many results, a trigger on `match_results` would keep a per-player stats table up to date instead, and history would page by `finished_at`.
 
 ## Deploying
 
@@ -191,7 +192,7 @@ make db-push   # applies new migrations to the linked project
 
 Vite bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key) and `VITE_TURNSTILE_SITE_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make db-check`, a dry run of `db push` against the hosted project.  If the hosted database is missing a migration from that commit, the job fails with the list of migrations and doesn't deploy: run `make db-push`, then re-run the job.  Otherwise it runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
 
 One-time setup:
 
@@ -199,9 +200,10 @@ One-time setup:
 2. **Cloudflare API token.** Under My Profile → API Tokens, create a custom token with the **Account → Cloudflare Pages → Edit** permission.  Your **account ID** is on the Workers & Pages overview.
 3. **GitHub.** In the repository's Settings → Environments, create an environment named `production` and add:
    - secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
-   - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and `VITE_TURNSTILE_SITE_KEY`.
+   - secret `SUPABASE_ACCESS_TOKEN`, for the migration check: a Supabase access token (Account → Access Tokens).  A personal token works.  The CLI's help says a scoped one may need `database_write` and `database_pooling_config_read`, because the dry run signs in through a temporary login role;
+   - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TURNSTILE_SITE_KEY` and `SUPABASE_PROJECT_REF`.
 
-The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).  It doesn't apply migrations: run `make db-push` before pushing code that needs them.
+The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).  It doesn't apply migrations: run `make db-push` before pushing code that needs them.  If you forget, `make db-check` stops the deploy.
 
 **Deploying from your machine** works too, for example if CI is down:
 
@@ -233,6 +235,7 @@ src/
   main.ts              screen routing
   supabase.ts, auth.ts client and anonymous sign-in
   lobby/               room list, create/join (Postgres Changes)
+  stats/               leaderboard and match history
   room/                RoomSession (Presence + Broadcast), waiting room, match and results screens
   game/                physics, host, client, snapshots, renderer, sandbox
   types.ts             shared types and message parsers

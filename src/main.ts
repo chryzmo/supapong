@@ -8,6 +8,7 @@ import { resultsScreen } from './room/results';
 import { scoresByPlayer, type MatchResult } from './room/standings';
 import { RoomSession } from './room/session';
 import { waitingScreen, type RoomActions } from './room/waiting';
+import { statsScreen } from './stats/stats';
 import { DISPLAY_NAME_MAX, validateDisplayName, type Gate, type Player, type SeatedRoom } from './types';
 import { errorMessage, h, type View } from './ui';
 
@@ -18,6 +19,7 @@ type Screen =
   | { name: 'room'; player: Player; room: SeatedRoom }
   | { name: 'match'; player: Player; gates: Gate[] }
   | { name: 'results'; player: Player; result: MatchResult }
+  | { name: 'stats'; player: Player }
   | { name: 'sandbox'; back: () => void };
 
 const app = document.querySelector<HTMLElement>('#app');
@@ -70,6 +72,7 @@ function render(screen: Screen): View {
             .catch(showError);
         },
         practice: () => show({ name: 'sandbox', back: () => show({ name: 'lobby', player }) }),
+        leaderboard: () => show({ name: 'stats', player }),
         rename: () => show({ name: 'pick-name', current: player }),
         signOut() {
           signOut()
@@ -103,6 +106,10 @@ function render(screen: Screen): View {
         ...(current.isHost ? { save: () => current.finishMatch(scoresByPlayer(result)) } : {}),
         back: () => show({ name: 'lobby', player }),
       });
+    }
+    case 'stats': {
+      const { player } = screen;
+      return statsScreen(player, { back: () => show({ name: 'lobby', player }) });
     }
     case 'sandbox':
       return sandboxScreen({ back: screen.back });

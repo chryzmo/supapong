@@ -2,10 +2,11 @@
 // renders the host's snapshots (ClientGame).  Both draw the same way.
 import { ClientGame } from '../game/client';
 import { COUNTDOWN_SECONDS, HostGame } from '../game/host';
-import { keyboardInput } from '../game/input';
+import { paddleInput } from '../game/input';
 import { startFrames } from '../game/loop';
 import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
 import { SEAT_COLORS, draw, type RenderView } from '../game/render';
+import { onMobileBrowser, touchControls } from '../game/touch';
 import type { Gate } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
@@ -47,7 +48,7 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
   const client = isHost
     ? undefined
     : new ClientGame(gates, myGate, (dir) => session.sendInput({ seat: room.seat, dir }), { config });
-  const input = keyboardInput((dir) => (host ? host.setOwnInput(dir) : client?.setOwnInput(dir)));
+  const input = paddleInput((dir) => (host ? host.setOwnInput(dir) : client?.setOwnInput(dir)));
 
   session.listen({
     input: (message) => host?.applyInput(message.seat, message.dir),
@@ -86,16 +87,20 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
     return view;
   }
 
+  // Spectators have no paddle, so they get no buttons.
+  const touch = onMobileBrowser() && myGate >= 0;
+
   return {
     el: h(
       'div',
       { className: 'stage single' },
       h(
         'div',
-        { className: 'stage-main' },
+        { className: touch ? 'stage-main touch' : 'stage-main' },
         canvas,
+        ...(touch ? [touchControls(input)] : []),
         hud,
-        h('p', { className: 'muted' }, '← → or A D to move'),
+        h('p', { className: 'muted' }, touch ? 'Hold ◀ ▶ to move' : '← → or A D to move'),
         h('div', { className: 'row' }, leave),
       ),
     ),

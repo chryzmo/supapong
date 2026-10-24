@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { botInput } from './bot';
-import { dirFromKeys } from './input';
+import { TOUCH_LEFT, TOUCH_RIGHT, dirFromKeys } from './input';
 import { interpolate } from './interpolate';
 import {
   DEFAULT_CONFIG,
@@ -22,6 +22,12 @@ describe('dirFromKeys', () => {
     expect(dirFromKeys(new Set(['KeyA']))).toBe(-1);
     expect(dirFromKeys(new Set(['ArrowLeft', 'KeyD']))).toBe(0);
     expect(dirFromKeys(new Set(['Space']))).toBe(0);
+  });
+
+  it('treats the touch buttons like the arrow keys', () => {
+    expect(dirFromKeys(new Set([TOUCH_LEFT]))).toBe(-1);
+    expect(dirFromKeys(new Set([TOUCH_RIGHT]))).toBe(1);
+    expect(dirFromKeys(new Set([TOUCH_LEFT, 'ArrowRight']))).toBe(0);
   });
 });
 

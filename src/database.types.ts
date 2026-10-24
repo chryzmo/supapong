@@ -25,14 +25,14 @@ export type Database = {
           Tables: {
             "match_results": {
                   Row: {
-                    "finished_at": string,"id": string,"room_id": string | null,"scores": NonNullable<Json>
+                    "finished_at": string,"id": string,"names": NonNullable<Json>,"room_id": string | null,"room_name": string | null,"scores": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "finished_at"?: string,"id"?: string,"room_id"?: string | null,"scores": NonNullable<Json>
+                    "finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"room_id"?: string | null,"room_name"?: string | null,"scores": NonNullable<Json>
                   }
                   Update: {
-                    "finished_at"?: string,"id"?: string,"room_id"?: string | null,"scores"?: NonNullable<Json>
+                    "finished_at"?: string,"id"?: string,"names"?: NonNullable<Json>,"room_id"?: string | null,"room_name"?: string | null,"scores"?: NonNullable<Json>
                   }
                   Relationships: [
                     {
@@ -118,7 +118,15 @@ isOneToOne: false
                 }
           }
           Views: {
-            "lobby_rooms": {
+            "leaderboard": {
+                  Row: {
+                    "display_name": string | null,"matches": number | null,"player_id": string | null,"points": number | null,"rank": number | null,"wins": number | null
+                  }
+                  ComputedFields: never
+                  Relationships: [
+                    
+                  ]
+                },"lobby_rooms": {
                   Row: {
                     "created_at": string,"host_id": string,"host_name": string,"id": string,"max_players": number,"name": string,"player_count": number | null
                   }
@@ -131,6 +139,14 @@ isOneToOne: false
       referencedRelation: "profiles"
       referencedColumns: ["id"]
     }
+                  ]
+                },"match_players": {
+                  Row: {
+                    "display_name": string | null,"finished_at": string,"place": number | null,"player_count": number | null,"player_id": string | null,"result_id": string,"room_name": string | null,"score": number | null,"won": boolean | null
+                  }
+                  ComputedFields: never
+                  Relationships: [
+                    
                   ]
                 }
           }

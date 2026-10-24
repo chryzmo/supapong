@@ -16,7 +16,6 @@ Multiplayer Pong on a circular board.  Each player defends a goal gate on the ri
 - Free-roaming paddles
 - Anti-cheat or server-authoritative physics
 - Host migration
-- Mobile or touch controls
 
 ## Stack
 
@@ -63,11 +62,14 @@ match_results (
   id uuid primary key default gen_random_uuid(),
   room_id uuid unique references rooms on delete set null,  -- results outlive their room
   scores jsonb not null,      -- { player_id: points }
+  room_name text,             -- copied at finish, so history outlives the room
+  names jsonb not null,       -- { player_id: display_name }, copied at finish
   finished_at timestamptz default now()
 )
 ```
 
 - Put a view or RPC called `lobby_rooms` on top of these.  It returns rooms where `status = 'waiting'` along with `player_count` and `max_players`, so the lobby can show "x/y".
+- Two views (`security_invoker`) serve stats.  `match_players` has one row per player per match: `place` (rank, ties shared) and `won` (first place, shared counts, in a match where not everyone tied).  `leaderboard` totals it per player: `matches`, `wins`, `points`, `rank` (by wins, then points).  Names come from the result, so they survive cleanup, and the leaderboard prefers the player's current name.
 - Joining happens through a `join_room(room_id)` RPC (`security definer`).  It checks capacity and status, assigns the lowest free seat, and does it all in one transaction so two players can't take the same seat.
 
 ### RLS
@@ -75,7 +77,7 @@ match_results (
 - `profiles`: anyone authenticated can read.  You can only insert or update your own row.
 - `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.
 - `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players)`, which creates the room and seats the host in one transaction.
-- `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result and sets the room to `finished`, all in one transaction.
+- `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result (with the room name and players' names from `profiles`) and sets the room to `finished`, all in one transaction.
 
 ### Realtime
 
@@ -118,7 +120,8 @@ match_results (
 - One stylesheet (`src/style.css`).  Dark theme, with the Supabase green as the accent.
 - **Board view:** each player sees the board rotated so their own gate is at the bottom.  Then everyone defends "down", and Left/Right on the keyboard move the paddle left/right on screen.  In world terms, +1 is counterclockwise, which is screen-right at the bottom.  Spectators and the sandbox without a seat get no rotation.
 - **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  A gate flashes when it concedes.  Names (cut to 10 characters) and scores sit outside the rim, upright.
-- **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.
+- **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.  On a mobile browser (`isMobileBrowser` in `touch.ts`: Client Hints, then the user agent including iPads posing as Macs, then a touch-only primary pointer), two hold-to-move buttons, ◀ and ▶, sit under the board, or either side of it on a phone held sideways.  They hold pseudo-keys in the same `PaddleInput` as the keyboard.  Spectators get none.  `?touch=1` or `?touch=0` forces them on or off.
+- **Leaderboard:** the lobby's Leaderboard button opens the top 10 players (plus your own row if you're further down) and the 10 latest matches, with an All / Mine toggle.
 - **Practice:** the sandbox is at `/#sandbox` (no sign-in needed) and behind the lobby's Practice button.  Its "Copy config" button copies the tuned physics settings as JSON for pasting into `DEFAULT_CONFIG`.
 
 ## Project layout
@@ -130,13 +133,15 @@ src/
   auth.ts            anonymous sign-in, profile upsert
   captcha.ts         Turnstile widget, loaded from Cloudflare on demand
   lobby/             lobby screen, room list, create room
+  stats/             leaderboard and match history screen
   room/              channel wiring: presence, broadcast send/receive
   game/
     physics.ts       pure functions, no DOM or network; unit tested
     bot.ts           computer paddles (sandbox); pure
     interpolate.ts   blend two states for drawing; pure
     loop.ts          fixed 60 Hz tick + per-frame draw
-    input.ts         keyboard -> paddle direction
+    input.ts         keyboard (and touch buttons) -> paddle direction
+    touch.ts         mobile browser check, on-screen paddle buttons
     sandbox.ts       single-player practice screen with tuning sliders
     snapshot.ts      state <-> `state` message, client snapshot buffer
     host.ts          fixed-step loop, input aggregation, snapshot broadcast
@@ -185,4 +190,4 @@ npm run check              # everything above plus typecheck; the pre-commit hoo
 npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```
 
-The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR, and deploys `main` to Cloudflare Pages only when it passes.  Migrations are still applied by hand with `make db-push`, before pushing code that needs them.  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.
+The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR, and deploys `main` to Cloudflare Pages only when it passes.  Migrations are still applied by hand with `make db-push`, before pushing code that needs them.  Before deploying, CI runs `make db-check` (a `db push --dry-run` against the hosted project), and fails without deploying if any migration is missing.  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.

@@ -5,6 +5,7 @@ import { createRoom, fetchLobbyRooms, joinRoom, subscribeLobby } from './api';
 export interface LobbyActions {
   enterRoom(roomId: string, seat: number): void;
   practice(): void;
+  leaderboard(): void;
   rename(): void;
   signOut(): void;
 }
@@ -118,6 +119,8 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   signOutButton.addEventListener('click', () => actions.signOut());
   const practiceButton = h('button', { className: 'secondary', type: 'button' }, 'Practice');
   practiceButton.addEventListener('click', () => actions.practice());
+  const leaderboardButton = h('button', { className: 'secondary', type: 'button' }, 'Leaderboard');
+  leaderboardButton.addEventListener('click', () => actions.leaderboard());
 
   const el = h(
     'div',
@@ -126,7 +129,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
       'div',
       { className: 'header' },
       h('h1', {}, `Hi, ${player.displayName}`),
-      h('div', { className: 'row' }, renameButton, signOutButton),
+      h('div', { className: 'row' }, leaderboardButton, renameButton, signOutButton),
     ),
     ...(notice ? [h('p', { className: 'notice' }, notice)] : []),
     h('h2', {}, 'Open rooms'),

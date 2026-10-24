@@ -1,10 +1,15 @@
 import type { Dir } from './physics';
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
+// Touch buttons (touch.ts) hold these pseudo-keys, so every control goes
+// through the same set.
+export const TOUCH_LEFT = 'TouchLeft';
+export const TOUCH_RIGHT = 'TouchRight';
+
+const LEFT = new Set(['ArrowLeft', 'KeyA', TOUCH_LEFT]);
+const RIGHT = new Set(['ArrowRight', 'KeyD', TOUCH_RIGHT]);
 
 /**
- * Paddle direction from the keys held down.  The board is drawn with your
+ * Paddle direction from the keys (and touch buttons) held down.  The board is drawn with your
  * gate at the bottom, where counterclockwise is screen-right, so Right is +1.
  * Holding both cancels out.
  */
@@ -14,13 +19,18 @@ export function dirFromKeys(held: ReadonlySet<string>): Dir {
   return left === right ? 0 : right ? 1 : -1;
 }
 
-export interface KeyboardInput {
+export interface PaddleInput {
   dir(): Dir;
+  /** Presses or releases a control that isn't a key, such as a touch button. */
+  hold(code: string, down: boolean): void;
   dispose(): void;
 }
 
-/** Tracks the paddle keys on `window`.  Calls onChange only when the direction changes. */
-export function keyboardInput(onChange?: (dir: Dir) => void): KeyboardInput {
+/**
+ * Tracks the paddle keys on `window`, plus anything pressed through hold().
+ * Calls onChange only when the direction changes.
+ */
+export function paddleInput(onChange?: (dir: Dir) => void): PaddleInput {
   const held = new Set<string>();
   let last: Dir = 0;
 
@@ -52,6 +62,11 @@ export function keyboardInput(onChange?: (dir: Dir) => void): KeyboardInput {
   window.addEventListener('blur', blur);
   return {
     dir: () => last,
+    hold(code, down) {
+      if (down) held.add(code);
+      else held.delete(code);
+      update();
+    },
     dispose() {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);

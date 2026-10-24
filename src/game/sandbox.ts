@@ -3,7 +3,7 @@
 import { MAX_PLAYERS, MIN_PLAYERS } from '../types';
 import { h, type View } from '../ui';
 import { botInput } from './bot';
-import { keyboardInput } from './input';
+import { paddleInput } from './input';
 import { interpolate } from './interpolate';
 import { startFixedLoop } from './loop';
 import {
@@ -19,6 +19,7 @@ import {
   type PhysicsConfig,
 } from './physics';
 import { SEAT_COLORS, draw, type GateLabel } from './render';
+import { onMobileBrowser, touchControls } from './touch';
 
 interface Slider {
   key: keyof PhysicsConfig;
@@ -144,7 +145,8 @@ export function sandboxScreen(actions: SandboxActions): View {
   // HUD and board ---------------------------------------------------------------
   const canvas = h('canvas', { className: 'board' });
   const hud = h('p', { className: 'muted hud' });
-  const input = keyboardInput();
+  const input = paddleInput();
+  const touch = onMobileBrowser();
 
   const onKey = (e: KeyboardEvent): void => {
     if (e.code === 'KeyP' || e.code === 'Space') {
@@ -194,10 +196,11 @@ export function sandboxScreen(actions: SandboxActions): View {
     { className: 'stage' },
     h(
       'div',
-      { className: 'stage-main' },
+      { className: touch ? 'stage-main touch' : 'stage-main' },
       canvas,
+      ...(touch ? [touchControls(input)] : []),
       hud,
-      h('p', { className: 'muted' }, '← → or A D to move · Space to pause · R to restart'),
+      h('p', { className: 'muted' }, touch ? 'Hold ◀ ▶ to move' : '← → or A D to move · Space to pause · R to restart'),
     ),
     h(
       'aside',

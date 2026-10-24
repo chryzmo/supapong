@@ -4,7 +4,8 @@
 # this is the only way code reaches production.
 #
 # Migrations are not applied here: run `make db-push` before pushing code
-# that depends on them.
+# that depends on them.  The deploy checks first, and stops if the hosted
+# database is missing any.
 
 name: CI
 
@@ -51,6 +52,15 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
+      # A dry run against the hosted project.  If it's missing a migration
+      # from this commit, the new frontend would call tables or functions that
+      # aren't there yet, so stop here with an error and a run summary.  Run
+      # `make db-push`, then re-run this job.
+      - name: Check the hosted database has every migration
+        run: make db-check
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       # Builds with the hosted values, refuses a build that points at the local
       # stack or uses Turnstile's test key, then uploads dist/.
       - run: make deploy-web

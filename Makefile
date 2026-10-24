@@ -23,7 +23,7 @@ endif
 .DEFAULT_GOAL := help
 .PHONY: help install start stop status reset types dev build preview clean \
 	typecheck test test-db test-integration check \
-	supabase-link db-diff db-push pages-create build-prod deploy-web deploy
+	supabase-link db-diff db-check db-push pages-create build-prod deploy-web deploy
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z-]+:.*## / {printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2} /^## / {printf "\n%s\n", substr($$0, 4)}' $(MAKEFILE_LIST)
@@ -86,6 +86,9 @@ supabase-link: ## Link this repo to a hosted project (SUPABASE_PROJECT_REF=...)
 
 db-diff: ## Show which migrations db-push would apply to the linked project
 	npx supabase db push --linked --dry-run
+
+db-check: ## Fail if the hosted project is missing migrations (CI runs this before deploying)
+	bash scripts/check-migrations.sh
 
 db-push: ## Apply migrations to the linked hosted project
 	npx supabase db push --linked

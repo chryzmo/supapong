@@ -30,6 +30,35 @@ export interface SeatedRoom {
   seat: number;
 }
 
+/** A row on the leaderboard.  Ranked by wins, then points; ties share a rank. */
+export interface LeaderboardEntry {
+  rank: number;
+  playerId: string;
+  displayName: string;
+  matches: number;
+  wins: number;
+  points: number;
+}
+
+/** A finished match, for the history list. */
+export interface MatchSummary {
+  id: string;
+  finishedAt: Date;
+  /** Null for results recorded before room names were kept. */
+  roomName: string | null;
+  /** Best place first. */
+  players: MatchPlayer[];
+}
+
+export interface MatchPlayer {
+  playerId: string;
+  displayName: string;
+  score: number;
+  place: number;
+  /** First place (shared counts) in a match where not everyone tied. */
+  won: boolean;
+}
+
 type Validated = { ok: true; value: string } | { ok: false; error: string };
 
 function validateName(raw: string, max: number, emptyError: string): Validated {
