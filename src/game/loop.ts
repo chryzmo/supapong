@@ -41,3 +41,34 @@ export function startFixedLoop(tick: () => void, draw: (alpha: number) => void):
     },
   };
 }
+
+/** Calls onTick periodically; returns a function that stops it. */
+export type Ticker = (onTick: () => void) => () => void;
+
+/**
+ * A ticker driven by a Web Worker timer.
+ *
+ * The host must keep simulating when its tab is in the background, but
+ * browsers throttle timers and pause requestAnimationFrame there.  Timers in a
+ * dedicated worker aren't throttled the same way, so the worker just sends a
+ * message every few milliseconds and the page runs whatever ticks are due.
+ */
+export const workerTicker: Ticker = (onTick) => {
+  const source = `setInterval(() => postMessage(0), ${Math.floor(DT * 1000 / 2)});`;
+  const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+  const worker = new Worker(url);
+  worker.onmessage = () => onTick();
+  return () => {
+    worker.terminate();
+    URL.revokeObjectURL(url);
+  };
+};
+
+/** Calls draw on every animation frame until stopped. */
+export function startFrames(draw: (nowMs: number) => void): () => void {
+  let frame = requestAnimationFrame(function loop(now) {
+    draw(now);
+    frame = requestAnimationFrame(loop);
+  });
+  return () => cancelAnimationFrame(frame);
+}
