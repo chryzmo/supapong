@@ -81,14 +81,14 @@ match_results (
 - **Lobby:** subscribe to Postgres Changes on `rooms` and `room_players`, and refetch `lobby_rooms` whenever one fires.  This is simple and the traffic is low.
 - **Room channel** `room:{id}`:
   - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
-  - **Broadcast `input`** (client → all): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.
-  - **Broadcast `state`** (host → all, about 20 Hz): ball position and velocity, every paddle angle, scores, and a tick number.
-  - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), and later `goal` and `end`.
+  - **Broadcast `input`** (client → all): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.  Only the host acts on it.
+  - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
+  - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
 
 ### Host-authoritative simulation
 
-- The room creator's browser runs physics at a fixed 60 Hz and broadcasts snapshots.
-- The other clients render by interpolating between the last two snapshots.  They only predict their own paddle locally.
+- The room creator's browser runs physics at a fixed 60 Hz and broadcasts snapshots.  Its timer runs in a Web Worker, because browsers throttle page timers in background tabs and a hidden host tab would otherwise freeze the match.  If it falls more than 15 ticks behind, it skips ahead.
+- The other clients render 100 ms in the past, interpolating between buffered snapshots.  They only predict their own paddle locally: it moves the moment a key is pressed, and eases toward the host's position once the player stops.
 - If the host disconnects, the match ends.  There is no migration in this version.
 - Keep payloads small and rates modest, since Realtime has per-project message quotas.
 
@@ -103,6 +103,7 @@ match_results (
   - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center with a random direction after a short delay.
   - If it reaches the rim on a wall, it reflects.
   - Speed ramps up slightly after each paddle hit, up to a cap.
+- A match opens with a 3-second countdown before the first launch.
 - The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host writes `match_results` and sets the room's `status = 'finished'`.
 
 ## Frontend
@@ -130,6 +131,7 @@ src/
     loop.ts          fixed 60 Hz tick + per-frame draw
     input.ts         keyboard -> paddle direction
     sandbox.ts       single-player practice screen with tuning sliders
+    snapshot.ts      state <-> `state` message, client snapshot buffer
     host.ts          fixed-step loop, input aggregation, snapshot broadcast
     client.ts        snapshot buffer, interpolation, local paddle prediction
     render.ts        Canvas 2D drawing

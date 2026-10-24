@@ -1,36 +1,98 @@
+// The match screen.  The host runs the game (HostGame); everyone else
+// renders the host's snapshots (ClientGame).  Both draw the same way.
+import { ClientGame } from '../game/client';
+import { COUNTDOWN_SECONDS, HostGame } from '../game/host';
+import { keyboardInput } from '../game/input';
+import { startFrames } from '../game/loop';
+import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
+import { SEAT_COLORS, draw, type RenderView } from '../game/render';
 import type { Gate } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
 import { exitRoom, leaveButton, type RoomActions } from './waiting';
 
-// Placeholder match screen: shows the gate order.  Milestone 5 replaces the
-// body with the game.
+const FLASH_MS = 600;
+const config = DEFAULT_CONFIG;
+
 export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomActions): View {
   const { room, player, isHost } = session;
+  const myGate = gates.findIndex((gate) => gate.playerId === player.id);
+  const labels = gates.map((gate, i) => ({ name: gate.displayName, color: SEAT_COLORS[i % SEAT_COLORS.length]! }));
+
+  const canvas = h('canvas', { className: 'board' });
+  const hud = h('p', { className: 'muted hud' });
   const leave = leaveButton(session, actions, isHost ? 'End match' : 'Leave match');
 
+  let flash: { gate: number; until: number } | undefined;
+  let finalScores: number[] | undefined;
+  const onGoal = (gate: number): void => {
+    flash = { gate, until: performance.now() + FLASH_MS };
+  };
+  const onEnd = (scores: number[]): void => {
+    finalScores = scores;
+    leave.textContent = 'Back to lobby';
+  };
+
+  const host = isHost ? new HostGame(session, gates, myGate, { config, onGoal, onEnd }) : undefined;
+  const client = isHost
+    ? undefined
+    : new ClientGame(gates, myGate, (dir) => session.sendInput({ seat: room.seat, dir }), { config });
+  const input = keyboardInput((dir) => (host ? host.setOwnInput(dir) : client?.setOwnInput(dir)));
+
   session.listen({
+    input: (message) => host?.applyInput(message.seat, message.dir),
+    state: (message) => client?.onState(message),
+    playerGone: (playerId) => host?.removePlayer(playerId),
     event(event) {
-      if (event.type === 'closed') actions.left('The host ended the match.');
+      if (event.type === 'goal' && !host) onGoal(event.gate);
+      if (event.type === 'end') onEnd(event.scores);
+      // After the final whistle the host leaving is expected; stay on the scores.
+      if (event.type === 'closed' && !finalScores) actions.left('The host ended the match.');
     },
-    hostGone: () => void exitRoom(session, actions, 'The host disconnected, so the match ended.'),
+    hostGone: () => {
+      if (!finalScores) void exitRoom(session, actions, 'The host disconnected, so the match ended.');
+    },
     seatLost: () => actions.left('You were disconnected from the match.'),
   });
+
+  host?.start();
+
+  const stopFrames = startFrames((now) => {
+    const state: GameState = host ? host.view() : client!.view();
+    draw(canvas, state, config, renderView(state, now));
+    const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
+    const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
+    hud.textContent = finalScores ? 'Final score' : `${time} left · first to ${config.scoreCap} · rally ${state.rally}`;
+  });
+
+  function renderView(state: GameState, now: number): RenderView {
+    const view: RenderView = { labels, viewerGate: myGate >= 0 ? myGate : null };
+    if (flash && now < flash.until) view.flashGate = flash.gate;
+    if (finalScores) view.centerText = 'Match over';
+    else if (client && !client.hasState()) view.centerText = 'Connecting…';
+    else if (state.respawnTicks > 0 && state.tick < COUNTDOWN_SECONDS * TICK_RATE) {
+      view.centerText = String(Math.ceil(state.respawnTicks / TICK_RATE));
+    }
+    return view;
+  }
 
   return {
     el: h(
       'div',
-      { className: 'panel' },
-      h('h1', {}, room.name),
-      h('p', {}, 'Match started.  Gameplay arrives in milestone 5.'),
+      { className: 'stage single' },
       h(
-        'ol',
-        { className: 'rooms' },
-        ...gates.map((gate, i) =>
-          h('li', {}, `Gate ${i + 1}: ${gate.displayName}${gate.playerId === player.id ? ' (you)' : ''}`),
-        ),
+        'div',
+        { className: 'stage-main' },
+        canvas,
+        hud,
+        h('p', { className: 'muted' }, '← → or A D to move'),
+        h('div', { className: 'row' }, leave),
       ),
-      h('div', { className: 'row' }, leave),
     ),
+    dispose() {
+      stopFrames();
+      input.dispose();
+      host?.stop();
+    },
   };
 }

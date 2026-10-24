@@ -262,3 +262,7 @@ label.check {
     grid-template-columns: 1fr;
   }
 }
+
+.stage.single {
+  grid-template-columns: 1fr;
+}
