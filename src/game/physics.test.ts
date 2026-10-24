@@ -228,6 +228,57 @@ describe('the rim', () => {
     expect(ballSpeed(state.ball)).toBeCloseTo(config.launchSpeed);
   });
 
+  it('keeps a plain reflection on the same diameter when jitter is off', () => {
+    const still = { ...config, wallJitter: 0 };
+    let state = radialShot(4, Math.PI / 4);
+    for (let i = 0; i < 300; i++) {
+      const result = step(state, [], still);
+      state = result.state;
+      if (result.events.some((e) => e.type === 'wall')) break;
+    }
+    const { x, y, vx, vy } = state.ball;
+    expect(x * vy - y * vx).toBeCloseTo(0, 9); // Still heading through the center.
+  });
+
+  it('knocks the ball off its diameter by at most wallJitter, keeping speed and heading inward', () => {
+    const turns: number[] = [];
+    for (let seed = 0; seed < 200; seed++) {
+      let state = { ...radialShot(4, Math.PI / 4), seed };
+      let before = state.ball;
+      for (let i = 0; i < 300; i++) {
+        before = state.ball;
+        const result = step(state, [], config);
+        state = result.state;
+        if (result.events.some((e) => e.type === 'wall')) break;
+      }
+      const { x, y, vx, vy } = state.ball;
+      // A plain reflection of a radial ball sends it straight back: -v.
+      const turn = Math.abs(angleDiff(Math.atan2(vy, vx), Math.atan2(-before.vy, -before.vx)));
+      turns.push(turn);
+      expect(turn).toBeLessThanOrEqual(config.wallJitter + 1e-9);
+      expect(ballSpeed(state.ball)).toBeCloseTo(config.launchSpeed);
+      expect(x * vx + y * vy).toBeLessThan(0);
+    }
+    // The turns are spread across the range, not all zero.
+    expect(Math.max(...turns)).toBeGreaterThan(config.wallJitter * 0.8);
+  });
+
+  it('keeps a grazing ball heading inward', () => {
+    // Nearly tangent to the rim, at max jitter, across many seeds.
+    for (let seed = 0; seed < 200; seed++) {
+      const r = 1 - config.ballRadius - 0.001;
+      const angle = Math.PI / 4;
+      const tangent = angle + Math.PI / 2 - 0.02;
+      const start = {
+        ...inPlay(4, Math.cos(angle) * r, Math.sin(angle) * r, Math.cos(tangent), Math.sin(tangent)),
+        seed,
+      };
+      const { state } = run(start, [], 30, (e) => e.type === 'wall');
+      const { x, y, vx, vy } = state.ball;
+      expect(x * vx + y * vy).toBeLessThan(0);
+    }
+  });
+
   it('treats an inactive gate as wall', () => {
     const { events } = run(setGateActive(radialShot(4, Math.PI), 2, false), [], 300, (e) => e.type !== 'launch');
     expect(events.at(-1)).toEqual({ type: 'wall' });

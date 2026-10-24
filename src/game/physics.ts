@@ -30,6 +30,13 @@ export interface PhysicsConfig {
    * toward the center.  Stops the ball from skimming along the rim forever.
    */
   minRadialShare: number;
+  /**
+   * Largest random turn (radians, either way) added to a wall bounce.  A
+   * plain reflection keeps a ball that passes through the center on that
+   * same diameter forever, so idle paddles at their gate centers would keep
+   * saving it.  A little jitter knocks it off that line.
+   */
+  wallJitter: number;
   /** Seconds the ball waits at the center before (re)launching. */
   respawnDelay: number;
   matchDuration: number;
@@ -47,6 +54,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   maxSpeed: 1.5,
   english: 0.6,
   minRadialShare: 0.4,
+  wallJitter: 0.09,
   respawnDelay: 1.2,
   matchDuration: 120,
   scoreCap: 10,
@@ -231,6 +239,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
 function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[]): GameState {
   let { x, y, vx, vy } = state.ball;
   let rally = state.rally;
+  let seed = state.seed;
   const n = state.gates.length;
   const hitR = config.paddleRadius - config.ballRadius;
   const rimR = 1 - config.ballRadius;
@@ -280,14 +289,19 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
           scores: state.scores.map((s, i) => (i !== goal && state.gates[i]!.active ? s + 1 : s)),
           respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
           rally: 0,
+          seed,
         };
       }
-      // Wall: mirror the velocity about the rim normal.
+      // Wall: mirror the velocity about the rim normal, then turn it by a
+      // small random angle.
       const nx = px / Math.hypot(px, py);
       const ny = py / Math.hypot(px, py);
       const dot = vx * nx + vy * ny;
       vx -= 2 * dot * nx;
       vy -= 2 * dot * ny;
+      const [r, nextSeed] = nextRandom(seed);
+      seed = nextSeed;
+      [vx, vy] = jitterBounce(vx, vy, nx, ny, (r * 2 - 1) * config.wallJitter);
       x = px - nx * 1e-9;
       y = py - ny * 1e-9;
       remaining -= tRim;
@@ -300,7 +314,22 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
     remaining = 0;
   }
 
-  return { ...state, ball: { x, y, vx, vy }, rally };
+  return { ...state, ball: { x, y, vx, vy }, rally, seed };
+}
+
+/**
+ * Turns a reflected velocity by `angle`, keeping its speed.  If that would
+ * leave a grazing ball heading along or out through the rim, the plain
+ * reflection is kept instead.
+ */
+function jitterBounce(vx: number, vy: number, nx: number, ny: number, angle: number): [number, number] {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const jx = vx * cos - vy * sin;
+  const jy = vx * sin + vy * cos;
+  const speed = Math.hypot(vx, vy);
+  // Require a clearly inward heading: at least ~3° off the rim's tangent.
+  return jx * nx + jy * ny < -0.05 * speed ? [jx, jy] : [vx, vy];
 }
 
 /**

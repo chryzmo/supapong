@@ -36,6 +36,7 @@ const SLIDERS: Slider[] = [
   { key: 'paddleSpeed', label: 'Paddle speed (gates/s)', min: 0.3, max: 4, step: 0.1 },
   { key: 'english', label: 'English', min: 0, max: 1.5, step: 0.05 },
   { key: 'minRadialShare', label: 'Min bounce-back angle', min: 0, max: 0.9, step: 0.05 },
+  { key: 'wallJitter', label: 'Wall bounce jitter (rad)', min: 0, max: 0.5, step: 0.01 },
   { key: 'gateFraction', label: 'Gate size (share of sector)', min: 0.2, max: 1, step: 0.02 },
   { key: 'ballRadius', label: 'Ball size', min: 0.01, max: 0.06, step: 0.002 },
 ];

@@ -101,7 +101,7 @@ match_results (
 - **Ball:**
   - If it crosses the paddle radius within a paddle's arc, reflect its radial velocity component.  Add tangential "english" based on how far from the paddle's center it hit.
   - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center with a random direction after a short delay.
-  - If it reaches the rim on a wall, it reflects.
+  - If it reaches the rim on a wall, it reflects, turned by a small random angle (`wallJitter`, ±0.09 rad by default) from the game's seeded PRNG.  A plain reflection keeps a ball that passes through the center on the same diameter forever, and with an even number of gates every wall faces another wall, so a launch into a wall could bounce out of everyone's reach for good.
   - Speed ramps up slightly after each paddle hit, up to a cap.
 - A match opens with a 3-second countdown before the first launch.
 - The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
