@@ -48,7 +48,7 @@ describe('sendFeedback', () => {
     const cy = await createPlayer('Cy');
     actAs(cy);
     for (let i = 0; i < 5; i++) await sendFeedback({ ...feedback, title: `Report ${i + 1}` });
-    await expect(sendFeedback(feedback)).rejects.toThrow('That’s plenty of feedback for one day.'.replace('’', "'"));
+    await expect(sendFeedback(feedback)).rejects.toThrow("That's plenty of feedback for one day.");
   });
 
   it('needs a name', async () => {
