@@ -1,9 +1,12 @@
 import { MIN_PLAYERS, type Gate, type RosterEntry } from '../types';
 import { errorMessage, h, type View } from '../ui';
 import type { RoomSession } from './session';
+import type { MatchResult } from './standings';
 
 export interface RoomActions {
   started(gates: Gate[]): void;
+  /** The match is over: show the results. */
+  ended(result: MatchResult): void;
   /** Back to the lobby, with an optional reason to show there. */
   left(notice?: string): void;
 }

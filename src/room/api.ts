@@ -35,3 +35,9 @@ export async function deleteRoom(client: AppClient, roomId: string): Promise<voi
   const { error } = await client.from('rooms').delete().eq('id', roomId);
   if (error) throw error;
 }
+
+/** Host only (checked in finish_match): records the result and finishes the room, in one transaction. */
+export async function finishMatch(client: AppClient, roomId: string, scores: Record<string, number>): Promise<void> {
+  const { error } = await client.rpc('finish_match', { p_room_id: roomId, p_scores: scores });
+  if (error) throw error;
+}

@@ -3,6 +3,8 @@ import { sandboxScreen } from './game/sandbox';
 import { fetchRoom, fetchSeatedRoom } from './lobby/api';
 import { lobbyScreen } from './lobby/lobby';
 import { matchScreen } from './room/match';
+import { resultsScreen } from './room/results';
+import { scoresByPlayer, type MatchResult } from './room/standings';
 import { RoomSession } from './room/session';
 import { waitingScreen, type RoomActions } from './room/waiting';
 import { DISPLAY_NAME_MAX, validateDisplayName, type Gate, type Player, type SeatedRoom } from './types';
@@ -14,6 +16,7 @@ type Screen =
   | { name: 'lobby'; player: Player; notice?: string }
   | { name: 'room'; player: Player; room: SeatedRoom }
   | { name: 'match'; player: Player; gates: Gate[] }
+  | { name: 'results'; player: Player; result: MatchResult }
   | { name: 'sandbox'; back: () => void };
 
 const app = document.querySelector<HTMLElement>('#app');
@@ -28,7 +31,7 @@ let session: RoomSession | undefined;
 
 function show(screen: Screen): void {
   current?.dispose?.();
-  if (screen.name !== 'room' && screen.name !== 'match' && session) {
+  if (screen.name !== 'room' && screen.name !== 'match' && screen.name !== 'results' && session) {
     void session.close();
     session = undefined;
   }
@@ -39,6 +42,7 @@ function show(screen: Screen): void {
 function roomActions(player: Player): RoomActions {
   return {
     started: (gates) => show({ name: 'match', player, gates }),
+    ended: (result) => show({ name: 'results', player, result }),
     left: (notice) => show({ name: 'lobby', player, notice }),
   };
 }
@@ -85,6 +89,19 @@ function render(screen: Screen): View {
     case 'match': {
       if (!session) throw new Error('No room session for the match.');
       return matchScreen(session, screen.gates, roomActions(screen.player));
+    }
+    case 'results': {
+      const { player, result } = screen;
+      const current = session;
+      if (!current) throw new Error('No room session for the results.');
+      // Nothing that happens in the room now should move us off the results.
+      current.listen({});
+      return resultsScreen(result, {
+        roomName: current.room.name,
+        playerId: player.id,
+        ...(current.isHost ? { save: () => current.finishMatch(scoresByPlayer(result)) } : {}),
+        back: () => show({ name: 'lobby', player }),
+      });
     }
     case 'sandbox':
       return sandboxScreen({ back: screen.back });

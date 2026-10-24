@@ -266,3 +266,37 @@ label.check {
 .stage.single {
   grid-template-columns: 1fr;
 }
+
+.results li {
+  justify-content: flex-start;
+}
+
+.results .place {
+  width: 1.5em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.results .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.results .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.results .score {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+}
+
+.results li.winner {
+  border-color: var(--accent);
+}

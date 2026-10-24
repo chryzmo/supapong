@@ -25,26 +25,26 @@ export type Database = {
           Tables: {
             "match_results": {
                   Row: {
-                    "finished_at": string,"id": string,"room_id": string,"scores": NonNullable<Json>
+                    "finished_at": string,"id": string,"room_id": string | null,"scores": NonNullable<Json>
                   }
                   ComputedFields: never
                   Insert: {
-                    "finished_at"?: string,"id"?: string,"room_id": string,"scores": NonNullable<Json>
+                    "finished_at"?: string,"id"?: string,"room_id"?: string | null,"scores": NonNullable<Json>
                   }
                   Update: {
-                    "finished_at"?: string,"id"?: string,"room_id"?: string,"scores"?: NonNullable<Json>
+                    "finished_at"?: string,"id"?: string,"room_id"?: string | null,"scores"?: NonNullable<Json>
                   }
                   Relationships: [
                     {
       foreignKeyName: "match_results_room_id_fkey"
       columns: ["room_id"]
-isOneToOne: false
+isOneToOne: true
       referencedRelation: "lobby_rooms"
       referencedColumns: ["id"]
     },{
       foreignKeyName: "match_results_room_id_fkey"
       columns: ["room_id"]
-isOneToOne: false
+isOneToOne: true
       referencedRelation: "rooms"
       referencedColumns: ["id"]
     }
@@ -137,6 +137,9 @@ isOneToOne: false
           Functions: {
             "create_room":
 { Args: { "p_max_players": number,"p_name": string }; Returns: string
+                           },
+"finish_match":
+{ Args: { "p_room_id": string,"p_scores": Json }; Returns: string
                            },
 "join_room":
 { Args: { "p_room_id": string }; Returns: number

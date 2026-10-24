@@ -1,7 +1,7 @@
 -- Lobby schema, RLS and RPC tests.  Run with `npx supabase test db`.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(43);
+select plan(46);
 
 -- Five players: A hosts, B-E join.
 insert into auth.users (id, is_anonymous) values
@@ -99,21 +99,31 @@ select throws_ok(
   'P0001', 'That match has already started.', 'cannot join a match in progress');
 
 -- match_results ----------------------------------------------------------------
+-- 'Test room' is playing with A (host) in seat 0 and D in seat 1.
 select pg_temp.login('00000000-0000-0000-0000-00000000000d');
 select throws_ok(
-  $$ insert into public.match_results (room_id, scores) values (pg_temp.room(), '{}') $$,
-  '42501', null, 'only the host can record results');
+  $$ select public.finish_match(pg_temp.room(), '{"00000000-0000-0000-0000-00000000000a": 0, "00000000-0000-0000-0000-00000000000d": 9}') $$,
+  '42501', null, 'only the host can record the result');
 
 select pg_temp.login('00000000-0000-0000-0000-00000000000a');
-select lives_ok(
+select throws_ok(
   $$ insert into public.match_results (room_id, scores) values (pg_temp.room(), '{}') $$,
-  'host can record results');
+  '42501', null, 'results cannot be inserted directly, even by the host');
+select lives_ok(
+  $$ select public.finish_match(pg_temp.room(), '{"00000000-0000-0000-0000-00000000000a": 3, "00000000-0000-0000-0000-00000000000d": 1}') $$,
+  'the host records the result');
+select is((select status from public.rooms where id = pg_temp.room()), 'finished', 'recording the result finishes the room');
 
--- Deleting the room clears its seats ---------------------------------------------
+-- Deleting the room clears its seats but keeps its result ------------------------
+create temp table deleted_room as select pg_temp.room() as id;
+grant select on deleted_room to authenticated;
 delete from public.rooms where id = pg_temp.room();
 select is(
-  (select count(*)::int from public.room_players rp where not exists (select 1 from public.rooms r where r.id = rp.room_id)),
+  (select count(*)::int from public.room_players where room_id = (select id from deleted_room)),
   0, 'deleting a room removes its seats');
+select is(
+  (select count(*)::int from public.match_results where room_id is null and scores ? '00000000-0000-0000-0000-00000000000d'),
+  1, 'deleting a room keeps its result');
 
 -- Room constraints ---------------------------------------------------------------
 select throws_ok($$ select public.create_room('Solo', 1) $$, '23514', null, 'rooms need at least 2 players');
@@ -143,7 +153,9 @@ select throws_ok(
   'P0001', null, 'finished rooms cannot restart');
 select is((select count(*)::int from public.lobby_rooms where id = pg_temp.second()), 0, 'finished rooms leave the lobby');
 
+reset role;
 insert into public.match_results (room_id, scores) values (pg_temp.second(), '{"a": 3}');
+set local role authenticated;
 
 select pg_temp.login('00000000-0000-0000-0000-00000000000b');
 delete from public.rooms where id = pg_temp.second();

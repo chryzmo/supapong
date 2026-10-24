@@ -6,6 +6,7 @@ import { HostGame } from '../../src/game/host';
 import type { Ticker } from '../../src/game/loop';
 import { DEFAULT_CONFIG, gateCenter, paddleTravel, wrapAngle, type PhysicsConfig } from '../../src/game/physics';
 import { RoomSession } from '../../src/room/session';
+import { scoresByPlayer } from '../../src/room/standings';
 import type { Gate, RoomEvent, SeatedRoom } from '../../src/types';
 import { createPlayer, delay, waitFor, type TestPlayer } from './helpers';
 
@@ -29,6 +30,12 @@ interface Guest {
   events: RoomEvent[];
   snapshots: number;
 }
+
+// A fixed seed makes each match deterministic: with nobody pressing keys, the
+// ball does the same thing every run.  Random seeds made the goal tests
+// flaky: a ball launched along a diameter can bounce between idle paddles
+// for a long time without a goal.
+const SEED = 1;
 
 async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CONFIG) {
   const hostGoals: number[] = [];
@@ -69,7 +76,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   await Promise.all(started);
 
   const goneIds: string[] = [];
-  const host = new HostGame(hostSession, gates, 0, { config, ticker: intervalTicker, onGoal: (g) => hostGoals.push(g) });
+  const host = new HostGame(hostSession, gates, 0, { config, seed: SEED, ticker: intervalTicker, onGoal: (g) => hostGoals.push(g) });
   hostSession.listen({
     input: (m) => host.applyInput(m.seat, m.dir),
     playerGone: (id) => {
@@ -99,7 +106,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
 
   host.start();
   cleanup.push(() => host.stop());
-  return { host, guests, gates, goneIds, hostGoals };
+  return { host, hostSession, guests, gates, goneIds, hostGoals, roomId };
 }
 
 it('streams snapshots to every guest at about 20 Hz', async () => {
@@ -153,4 +160,21 @@ it('announces every goal and the final score', async () => {
     const end = guest.events.find((e) => e.type === 'end');
     expect(end?.type === 'end' && end.scores).toEqual(host.view().scores);
   }
+});
+
+it('records the result once, finishes the room, and lets guests read it', async () => {
+  const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 5, scoreCap: 99 };
+  const { host, hostSession, guests, gates, roomId } = await startMatch(2, config);
+  await waitFor(() => host.isOver(), 'the match to end', 12_000);
+
+  const state = host.view();
+  const scores = scoresByPlayer({ gates, scores: state.scores, active: state.gates.map((g) => g.active) });
+  // The match screen and the results screen both ask; only one row is written.
+  await Promise.all([hostSession.finishMatch(scores), hostSession.finishMatch(scores)]);
+
+  const guest = guests[0]!.player.client;
+  const { data: results } = await guest.from('match_results').select('scores').eq('room_id', roomId);
+  expect(results).toEqual([{ scores }]);
+  const { data: room } = await guest.from('rooms').select('status').eq('id', roomId).single();
+  expect(room?.status).toBe('finished');
 });

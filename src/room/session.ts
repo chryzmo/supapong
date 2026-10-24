@@ -26,7 +26,7 @@ import {
   type SeatedRoom,
   type StateMessage,
 } from '../types';
-import { deleteRoom, fetchSeatIds, hasSeat, removePlayer, setRoomStatus } from './api';
+import { deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setRoomStatus } from './api';
 import { AbsenceTracker, rosterFromPresence, staleSeats } from './presence';
 
 /** How long a player can be missing from Presence before losing their seat. Covers a page reload. */
@@ -72,7 +72,8 @@ export class RoomSession {
   private timer: ReturnType<typeof setInterval>;
   private checking = false;
   private subscribedBefore = false;
-  private phase: 'waiting' | 'playing' = 'waiting';
+  private phase: 'waiting' | 'playing' | 'finished' = 'waiting';
+  private saving: Promise<void> | undefined;
   private ended = false;
 
   constructor(
@@ -164,12 +165,29 @@ export class RoomSession {
   }
 
   /**
+   * Host only.  Records the result (see finish_match).  Repeat calls share
+   * the first attempt unless it failed, so the match and results screens
+   * can both ask without saving twice.
+   */
+  finishMatch(scores: Record<string, number>): Promise<void> {
+    if (!this.isHost) return Promise.reject(new Error('Only the host can record the result.'));
+    this.phase = 'finished';
+    this.saving ??= finishMatch(this.client, this.room.id, scores).catch((err: unknown) => {
+      this.saving = undefined;
+      throw err;
+    });
+    return this.saving;
+  }
+
+  /**
    * Leaves the room for good.  A guest gives up their seat.  The host tells
    * everyone first (there's no one to hear from afterwards), then closes the
    * room: deleting it while waiting, or marking it finished mid-match so the
    * match can still be recorded.
    */
   async leave(): Promise<void> {
+    // After the final whistle there's nothing to give up: the room is done.
+    if (this.phase === 'finished') return;
     if (!this.isHost) {
       await removePlayer(this.client, this.room.id, this.player.id);
       return;
@@ -207,6 +225,7 @@ export class RoomSession {
       return;
     }
     if (event.type === 'start') this.phase = 'playing';
+    if (event.type === 'end') this.phase = 'finished';
     this.listener.event?.(event);
   }
 

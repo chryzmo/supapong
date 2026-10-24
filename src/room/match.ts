@@ -9,9 +9,12 @@ import { SEAT_COLORS, draw, type RenderView } from '../game/render';
 import type { Gate } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
+import { scoresByPlayer, type MatchResult } from './standings';
 import { exitRoom, leaveButton, type RoomActions } from './waiting';
 
 const FLASH_MS = 600;
+/** How long "Match over" stays on the board before the results screen. */
+const RESULTS_DELAY_MS = 1500;
 const config = DEFAULT_CONFIG;
 
 export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomActions): View {
@@ -25,12 +28,19 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
 
   let flash: { gate: number; until: number } | undefined;
   let finalScores: number[] | undefined;
+  let resultsTimer: ReturnType<typeof setTimeout> | undefined;
   const onGoal = (gate: number): void => {
     flash = { gate, until: performance.now() + FLASH_MS };
   };
   const onEnd = (scores: number[]): void => {
+    if (finalScores) return;
     finalScores = scores;
-    leave.textContent = 'Back to lobby';
+    leave.disabled = true;
+    const state = host ? host.view() : client!.view();
+    const result: MatchResult = { gates, scores, active: state.gates.map((g) => g.active) };
+    // The host saves straight away; the results screen shows how it went.
+    if (isHost) session.finishMatch(scoresByPlayer(result)).catch(() => {});
+    resultsTimer = setTimeout(() => actions.ended(result), RESULTS_DELAY_MS);
   };
 
   const host = isHost ? new HostGame(session, gates, myGate, { config, onGoal, onEnd }) : undefined;
@@ -90,6 +100,7 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
       ),
     ),
     dispose() {
+      clearTimeout(resultsTimer);
       stopFrames();
       input.dispose();
       host?.stop();

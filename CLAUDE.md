@@ -60,7 +60,7 @@ room_players (
 
 match_results (
   id uuid primary key default gen_random_uuid(),
-  room_id uuid references rooms,
+  room_id uuid unique references rooms on delete set null,  -- results outlive their room
   scores jsonb not null,      -- { player_id: points }
   finished_at timestamptz default now()
 )
@@ -74,7 +74,7 @@ match_results (
 - `profiles`: anyone authenticated can read.  You can only insert or update your own row.
 - `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.
 - `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players)`, which creates the room and seats the host in one transaction.
-- `match_results`: anyone authenticated can read.  Only the room's host can insert.
+- `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result and sets the room to `finished`, all in one transaction.
 
 ### Realtime
 
@@ -104,7 +104,7 @@ match_results (
   - If it reaches the rim on a wall, it reflects.
   - Speed ramps up slightly after each paddle hit, up to a cap.
 - A match opens with a 3-second countdown before the first launch.
-- The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host writes `match_results` and sets the room's `status = 'finished'`.
+- The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
 
 ## Frontend
 
