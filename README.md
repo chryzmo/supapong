@@ -21,7 +21,7 @@ make dev                   # http://127.0.0.1:5173
 
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
-- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Power-ups are on by default; untick them in Create room for a classic match.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
+- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Power-ups are on by default; untick them in Create room for a classic match.  In the waiting room the host picks what ends the match (5 to 25 goals, 2, 5 or 10 minutes, or no limit on one of them) and can switch power-ups on or off.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
 ## How it fits together
@@ -123,7 +123,7 @@ The design is host-authoritative.  Guests replay the host's physics between snap
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input:{player_id}` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
 | `state` | host → guests | 20 Hz | `{ tick, balls: [x, y, vx, vy, touch, rally][], paddles[], active[], scores[], goals, seed, respawn }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
-| `event` | host → all | rare | `start` (gate order, bots marked, goal limit, power-ups on or off, the oldest protocol version that can play it), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
+| `event` | host → all | rare | `start` (gate order, bots marked, goal limit and length, power-ups on or off, the oldest protocol version that can play it), `settings` (the host changed the goal limit, length or power-ups), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.
 
@@ -153,7 +153,7 @@ The tests don't cover the DOM screens themselves.  Those are checked by hand in 
 
 These are deliberate trade-offs for a prototype.  Each one is noted where it lives in the code.
 
-- **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.  The database only checks that a result is plausible: points only for players seated at the start, no more points than the goal limit, and not sooner than the match could have lasted.  Guests confirm the scores they were shown, and only results most players confirmed count toward the leaderboard, so a host who records different scores from the ones it showed is left out.  A host can still show everyone the same fake match.  So can two accounts owned by one person, and a match whose guests left before the end can't be ranked at all.  `plans/anti-cheat.md` has the next steps.
+- **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.  The database only checks that a result is plausible: points only for players seated at the start, no more points than the goal limit (if there is one), and not sooner than the match could have lasted.  Guests confirm the scores they were shown, and only results most players confirmed count toward the leaderboard, so a host who records different scores from the ones it showed is left out.  A host can still show everyone the same fake match.  So can two accounts owned by one person, and a match whose guests left before the end can't be ranked at all.  `plans/anti-cheat.md` has the next steps.
 - **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **Guests decide their own saves.** A guest's claim is checked for plausibility, not proof, so a modified client could claim saves it didn't make.  That's the anti-cheat non-goal again.
 - **A late save looks like a jump to everyone else.** When the host accepts a claim, the host and other guests see the ball, already past the paddle or gone, come back on its bounce.  The guest who made the save sees it as it happened.

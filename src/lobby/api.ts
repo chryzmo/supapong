@@ -4,7 +4,7 @@ import { DEFAULT_GOAL_LIMIT, type LobbyRoom, type SeatedRoom } from '../types';
 export async function fetchLobbyRooms(): Promise<LobbyRoom[]> {
   const { data, error } = await supabase
     .from('lobby_rooms')
-    .select('id, name, host_id, host_name, player_count, max_players, goal_limit, power_ups')
+    .select('id, name, host_id, host_name, player_count, max_players, goal_limit, power_ups, match_seconds')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data.map((r) => ({
@@ -15,6 +15,7 @@ export async function fetchLobbyRooms(): Promise<LobbyRoom[]> {
     playerCount: r.player_count ?? 0,
     maxPlayers: r.max_players,
     goalLimit: r.goal_limit,
+    matchSeconds: r.match_seconds,
     powerUps: r.power_ups,
   }));
 }
@@ -54,7 +55,7 @@ export async function leaveRoom(room: SeatedRoom, userId: string): Promise<void>
 export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null> {
   const { data, error } = await supabase
     .from('room_players')
-    .select('seat, rooms!inner(id, name, host_id, max_players, goal_limit, power_ups, status)')
+    .select('seat, rooms!inner(id, name, host_id, max_players, goal_limit, match_seconds, power_ups, status)')
     .eq('player_id', userId)
     .eq('rooms.status', 'waiting')
     .order('joined_at', { ascending: false })
@@ -68,6 +69,7 @@ export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null
     hostId: data.rooms.host_id,
     maxPlayers: data.rooms.max_players,
     goalLimit: data.rooms.goal_limit,
+    matchSeconds: data.rooms.match_seconds,
     powerUps: data.rooms.power_ups,
     seat: data.seat,
   };
@@ -76,7 +78,7 @@ export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null
 export async function fetchRoom(roomId: string, seat: number): Promise<SeatedRoom> {
   const { data, error } = await supabase
     .from('rooms')
-    .select('id, name, host_id, max_players, goal_limit, power_ups')
+    .select('id, name, host_id, max_players, goal_limit, match_seconds, power_ups')
     .eq('id', roomId)
     .single();
   if (error) throw error;
@@ -86,6 +88,7 @@ export async function fetchRoom(roomId: string, seat: number): Promise<SeatedRoo
     hostId: data.host_id,
     maxPlayers: data.max_players,
     goalLimit: data.goal_limit,
+    matchSeconds: data.match_seconds,
     powerUps: data.power_ups,
     seat,
   };

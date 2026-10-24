@@ -4,6 +4,7 @@ import { MAX_PLAYERS, MIN_PLAYERS } from '../types';
 import { h, type View } from '../ui';
 import { botInput } from './bot';
 import { paddleInput } from './input';
+import { hudParts } from './hud';
 import { interpolate } from './interpolate';
 import { startFixedLoop } from './loop';
 import {
@@ -204,26 +205,13 @@ export function sandboxScreen(actions: SandboxActions): View {
     },
     (alpha) => {
       const shown = interpolate(prev, state, alpha);
-      const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
       draw(canvas, shown, config, {
         labels: labels(),
         viewerGate: 0,
         ...(flash && state.tick < flash.until ? { flashGate: flash.gate, ...(flash.scorer >= 0 ? { scorerGate: flash.scorer } : {}) } : {}),
         ...(over ? { centerText: 'Match over' } : state.tick < config.respawnDelay * TICK_RATE ? { centerText: 'Ready' } : {}),
       });
-      const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-      const you = state.gates[0];
-      const effects = [
-        ...(you?.wideTicks ? [`wide ${Math.ceil(you.wideTicks / TICK_RATE)}s`] : []),
-        ...(you?.shieldTicks ? [`shield ${Math.ceil(you.shieldTicks / TICK_RATE)}s`] : []),
-      ];
-      hud.textContent = [
-        `${time} left`,
-        `${state.goals}/${config.goalLimit} goals`,
-        `rally ${Math.max(...state.balls.map((b) => b.rally))}`,
-        `speed ${Math.max(...state.balls.map(ballSpeed)).toFixed(2)}`,
-        ...effects,
-      ].join(' · ');
+      hud.textContent = [...hudParts(state, config, 0), `speed ${Math.max(...state.balls.map(ballSpeed)).toFixed(2)}`].join(' · ');
     },
   );
 

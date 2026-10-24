@@ -168,6 +168,22 @@ describe('HostGame', () => {
     advance(1000);
     expect(states.length).toBe(sent);
   });
+  it('plays on past the usual 2 minutes with no time limit', () => {
+    // Tiny paddles, so goals keep coming, and a goal limit it won't reach.
+    const { host, events, advance } = hostHarness({ ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: Infinity, goalLimit: 1000 });
+    advance(DEFAULT_CONFIG.matchDuration * 1000 + 5_000);
+    expect(events.filter((e) => e.type === 'goal').length).toBeGreaterThan(0);
+    expect(host.isOver()).toBe(false);
+  });
+
+  it('ends on time with no goal limit, however many goals', () => {
+    const { host, events, advance } = hostHarness({ ...DEFAULT_CONFIG, matchDuration: 20, goalLimit: Infinity });
+    advance(19_000);
+    expect(host.isOver()).toBe(false);
+    advance(2_000);
+    expect(host.isOver()).toBe(true);
+    expect(events.some((e) => e.type === 'end')).toBe(true);
+  });
 });
 
 describe('HostGame saves', () => {

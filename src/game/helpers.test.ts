@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { botInput } from './bot';
+import { hudParts } from './hud';
 import { TOUCH_LEFT, TOUCH_RIGHT, dirFromKeys } from './input';
 import { interpolate } from './interpolate';
 import {
   DEFAULT_CONFIG,
+  TICK_RATE,
   createGame,
   gateCenter,
   paddleTravel,
@@ -147,5 +149,23 @@ describe('interpolate', () => {
     const from = { ...a, gates: a.gates.map((g, i) => (i === 2 ? { ...g, paddle: gate2 - 0.1 } : g)) };
     const to = { ...a, gates: a.gates.map((g, i) => (i === 2 ? { ...g, paddle: -gate2 + 0.1 } : g)) };
     expect(Math.abs(interpolate(from, to, 0.5).gates[2]!.paddle)).toBeCloseTo(Math.PI);
+  });
+});
+
+describe('hudParts', () => {
+  const state: GameState = { ...createGame(4, 1, config), tick: 75 * TICK_RATE, goals: 3 };
+
+  it('counts down the clock and shows goals out of the limit', () => {
+    expect(hudParts(state, config, 0).slice(0, 2)).toEqual(['0:45 left', '3/10 goals']);
+  });
+
+  it('counts the clock up with no time limit, and just counts goals with no goal limit', () => {
+    expect(hudParts(state, { ...config, matchDuration: Infinity, goalLimit: Infinity }, 0).slice(0, 2)).toEqual(['1:15 played', '3 goals']);
+  });
+
+  it("adds the gate's own power-ups", () => {
+    const powered = { ...state, gates: state.gates.map((g, i) => (i === 0 ? { ...g, wideTicks: 90, shieldTicks: 600 } : g)) };
+    expect(hudParts(powered, config, 0).slice(3)).toEqual(['wide 2s', 'shield 10s']);
+    expect(hudParts(powered, config, 1).slice(3)).toEqual([]);
   });
 });

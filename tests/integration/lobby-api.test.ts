@@ -29,7 +29,7 @@ describe('createRoom', () => {
     actAs(host);
     const roomId = await createRoom('Arena', 4);
 
-    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, goalLimit: 10, powerUps: true, seat: 0 });
+    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 0 });
 
     actAs(other);
     expect(await lobbyEntry(roomId)).toEqual({
@@ -40,6 +40,7 @@ describe('createRoom', () => {
       playerCount: 1,
       maxPlayers: 4,
       goalLimit: 10,
+      matchSeconds: 120,
       powerUps: true,
     });
   });
@@ -85,7 +86,7 @@ describe('joinRoom', () => {
     expect(await joinRoom(roomId)).toBe(1);
     expect(await joinRoom(roomId)).toBe(1);
     expect((await lobbyEntry(roomId))?.playerCount).toBe(2);
-    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, goalLimit: 10, powerUps: true, seat: 1 });
+    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 1 });
   });
 
   it('surfaces the RPC error messages', async () => {

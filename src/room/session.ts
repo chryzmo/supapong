@@ -34,6 +34,7 @@ import {
   parseStateMessage,
   type Gate,
   type InputMessage,
+  type MatchSettings,
   type MatchStart,
   type Player,
   type RoomEvent,
@@ -41,7 +42,7 @@ import {
   type SeatedRoom,
   type StateMessage,
 } from '../types';
-import { confirmResult, deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setRoomStatus } from './api';
+import { confirmResult, deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setMatchSettings, setRoomStatus } from './api';
 import { lineup } from './lineup';
 import { AbsenceTracker, rosterFromPresence, staleSeats } from './presence';
 
@@ -95,6 +96,8 @@ export class RoomSession {
   private phase: 'waiting' | 'playing' | 'finished' = 'waiting';
   private saving: Promise<void> | undefined;
   private confirming: Promise<void> | undefined;
+  /** The match settings: the room's, then the host's changes as they come. */
+  private settings: MatchSettings;
   private ended = false;
 
   constructor(
@@ -103,6 +106,7 @@ export class RoomSession {
     options: SessionOptions = {},
   ) {
     this.isHost = room.hostId === player.id;
+    this.settings = { goalLimit: room.goalLimit, matchSeconds: room.matchSeconds, powerUps: room.powerUps };
     this.client = options.client ?? supabase;
     this.graceMs = options.graceMs ?? ROOM_GRACE_MS;
 
@@ -206,6 +210,22 @@ export class RoomSession {
     void this.channel.send({ type: 'broadcast', event: 'state', payload: message });
   }
 
+  getSettings(): MatchSettings {
+    return this.settings;
+  }
+
+  /**
+   * Host only, before the match.  Saves the match settings (see
+   * set_match_settings), then tells everyone in the room, so their waiting
+   * rooms show it.  Players who join later read it from the room.
+   */
+  async changeSettings(settings: MatchSettings): Promise<void> {
+    if (!this.isHost) throw new Error('Only the host can change the match settings.');
+    await setMatchSettings(this.client, this.room.id, settings);
+    this.settings = settings;
+    await this.send({ type: 'settings', ...settings });
+  }
+
   /**
    * Host only.  Locks the room (no more joins), drops seats whose players
    * aren't connected, and tells everyone the gate order, bots included.
@@ -225,10 +245,9 @@ export class RoomSession {
     this.phase = 'playing';
     // Before `start`, so the first inputs, sent once guests hear it, aren't lost.
     await this.listenForInputs(humans.filter((gate) => gate.playerId !== this.player.id));
-    const { goalLimit, powerUps } = this.room;
-    const protocol = matchProtocol(powerUps);
-    await this.send({ type: 'start', gates, goalLimit, protocol, powerUps });
-    return { gates, goalLimit, protocol, powerUps, ...(options.botSkill !== undefined ? { botSkill: options.botSkill } : {}) };
+    const protocol = matchProtocol(this.settings);
+    await this.send({ type: 'start', gates, ...this.settings, protocol });
+    return { gates, ...this.settings, protocol, ...(options.botSkill !== undefined ? { botSkill: options.botSkill } : {}) };
   }
 
   /**
@@ -302,6 +321,7 @@ export class RoomSession {
       if (event.playerId === this.player.id) this.loseSeat();
       return;
     }
+    if (event.type === 'settings') this.settings = { goalLimit: event.goalLimit, matchSeconds: event.matchSeconds, powerUps: event.powerUps };
     if (event.type === 'start') this.phase = 'playing';
     if (event.type === 'end') this.phase = 'finished';
     this.listener.event?.(event);

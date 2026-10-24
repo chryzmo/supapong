@@ -4,6 +4,7 @@ import {
   MAX_PLAYERS,
   MIN_PLAYERS,
   ROOM_NAME_MAX,
+  describeMatchEnd,
   validateRoomName,
   type LobbyRoom,
   type Player,
@@ -109,7 +110,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
             h(
               'span',
               { className: 'muted' },
-              `${room.hostName} · ${room.playerCount}/${room.maxPlayers} · ${room.goalLimit} goals · ${room.powerUps ? '⚡ power-ups' : 'classic'}`,
+              `${room.hostName} · ${room.playerCount}/${room.maxPlayers} · ${describeMatchEnd(room)} · ${room.powerUps ? '⚡ power-ups' : 'classic'}`,
             ),
           ),
           join,

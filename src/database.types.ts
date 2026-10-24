@@ -129,14 +129,14 @@ isOneToOne: false
                   ]
                 },"rooms": {
                   Row: {
-                    "created_at": string,"goal_limit": number,"host_id": string,"id": string,"max_players": number,"name": string,"power_ups": boolean,"started_at": string | null,"starting_players": (string)[] | null,"status": string
+                    "created_at": string,"goal_limit": number | null,"host_id": string,"id": string,"match_seconds": number | null,"max_players": number,"name": string,"power_ups": boolean,"started_at": string | null,"starting_players": (string)[] | null,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"goal_limit"?: number,"host_id": string,"id"?: string,"max_players": number,"name": string,"power_ups"?: boolean,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number | null,"host_id": string,"id"?: string,"match_seconds"?: number | null,"max_players": number,"name": string,"power_ups"?: boolean,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
                   }
                   Update: {
-                    "created_at"?: string,"goal_limit"?: number,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"power_ups"?: boolean,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number | null,"host_id"?: string,"id"?: string,"match_seconds"?: number | null,"max_players"?: number,"name"?: string,"power_ups"?: boolean,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
                   }
                   Relationships: [
                     {
@@ -160,7 +160,7 @@ isOneToOne: false
                   ]
                 },"lobby_rooms": {
                   Row: {
-                    "created_at": string,"goal_limit": number,"host_id": string,"host_name": string,"id": string,"max_players": number,"name": string,"player_count": number | null,"power_ups": boolean
+                    "created_at": string,"goal_limit": number | null,"host_id": string,"host_name": string,"id": string,"match_seconds": number | null,"max_players": number,"name": string,"player_count": number | null,"power_ups": boolean
                   }
                   ComputedFields: never
                   Relationships: [
@@ -190,7 +190,7 @@ isOneToOne: false
 { Args: { "p_room_id": string,"p_scores": Json }; Returns: undefined
                            },
 "create_room":
-{ Args: { "p_goal_limit"?: number,"p_max_players": number,"p_name": string,"p_power_ups"?: boolean }; Returns: string
+{ Args: { "p_goal_limit"?: number,"p_match_seconds"?: number,"p_max_players": number,"p_name": string,"p_power_ups"?: boolean }; Returns: string
                            },
 "finish_match":
 { Args: { "p_room_id": string,"p_scores": Json }; Returns: string
@@ -200,6 +200,9 @@ isOneToOne: false
                            },
 "refresh_ranking":
 { Args: { "p_room_id": string }; Returns: undefined
+                           },
+"set_match_settings":
+{ Args: { "p_goal_limit": number,"p_match_seconds": number,"p_power_ups": boolean,"p_room_id": string }; Returns: undefined
                            },
 "set_room_status":
 { Args: { "p_room_id": string,"p_status": string }; Returns: undefined

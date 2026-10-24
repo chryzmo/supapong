@@ -7,15 +7,16 @@ export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
 /**
  * The version of the match messages this code speaks.  2: snapshots carry
- * `balls`.  3: power-ups.  The host's `start` says the oldest version that
- * can play that match (matchProtocol), so a guest on older code knows to
- * reload, and only when it has to.
+ * `balls`.  3: power-ups.  4: match lengths and "no limit".  The host's
+ * `start` says the oldest version that can play that match (matchProtocol),
+ * so a guest on older code knows to reload, and only when it has to.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** The oldest PROTOCOL_VERSION that can play a match. */
-export function matchProtocol(powerUps: boolean): number {
-  return powerUps ? 3 : 2;
+export function matchProtocol(match: MatchSettings): number {
+  if (match.goalLimit === null || match.matchSeconds !== DEFAULT_MATCH_SECONDS) return 4;
+  return match.powerUps ? 3 : 2;
 }
 /** How many kinds of token there are (PICKUP_KINDS in physics.ts). */
 const PICKUP_KIND_COUNT = 3;
@@ -25,6 +26,29 @@ export const MAX_BALLS = 8;
 export const GOAL_LIMIT_CHOICES = [5, 10, 15, 20, 25] as const;
 export const DEFAULT_GOAL_LIMIT = 10;
 const GOAL_LIMIT_MAX = 50;
+/** How long a match lasts, in seconds.  The database accepts only these. */
+export const MATCH_LENGTH_CHOICES = [120, 300, 600] as const;
+export const DEFAULT_MATCH_SECONDS = 120;
+
+/**
+ * The host's choices for a match.  What ends it: a total number of goals, a
+ * length in seconds, or both, whichever comes first (null is "no limit", and
+ * at most one can be).  And whether it has power-ups.
+ */
+export interface MatchSettings {
+  goalLimit: number | null;
+  matchSeconds: number | null;
+  powerUps: boolean;
+}
+
+/** "10 goals or 2 minutes", "10 goals", "5 minutes". */
+export function describeMatchEnd({ goalLimit, matchSeconds }: Pick<MatchSettings, 'goalLimit' | 'matchSeconds'>): string {
+  const parts = [
+    ...(goalLimit !== null ? [`${goalLimit} goals`] : []),
+    ...(matchSeconds !== null ? [`${matchSeconds / 60} minutes`] : []),
+  ];
+  return parts.join(' or ');
+}
 
 export interface Player {
   id: string;
@@ -32,25 +56,21 @@ export interface Player {
 }
 
 /** A row in the lobby list. */
-export interface LobbyRoom {
+export interface LobbyRoom extends MatchSettings {
   id: string;
   name: string;
   hostId: string;
   hostName: string;
   playerCount: number;
   maxPlayers: number;
-  goalLimit: number;
-  powerUps: boolean;
 }
 
-/** A room the current player is seated in. */
-export interface SeatedRoom {
+/** A room the current player is seated in, with its match settings as they were when it was fetched. */
+export interface SeatedRoom extends MatchSettings {
   id: string;
   name: string;
   hostId: string;
   maxPlayers: number;
-  goalLimit: number;
-  powerUps: boolean;
   seat: number;
 }
 
@@ -125,14 +145,10 @@ export interface Gate {
 }
 
 /** What the host tells everyone when the match starts. */
-export interface MatchStart {
+export interface MatchStart extends MatchSettings {
   gates: Gate[];
-  /** Goals in total that end the match, from the room. */
-  goalLimit: number;
   /** The oldest PROTOCOL_VERSION that can play this match (matchProtocol).  1 when a host on older code leaves it out. */
   protocol: number;
-  /** Whether the match has power-ups.  Off when a host on older code leaves it out. */
-  powerUps: boolean;
   /** Host only, never sent: how well the bots play, 0 to 1 (see botInput). */
   botSkill?: number;
 }
@@ -144,7 +160,9 @@ export type RoomEvent =
   | { type: 'removed'; playerId: string }
   /** `scorer`: the gate that got the point, left out if nobody did. */
   | { type: 'goal'; gate: number; scorer?: number }
-  | { type: 'end'; scores: number[] };
+  | { type: 'end'; scores: number[] }
+  /** The host changed the match settings, in the waiting room. */
+  | ({ type: 'settings' } & MatchSettings);
 
 /**
  * Broadcast `input` (player -> host): sent when the direction changes, and a
@@ -237,6 +255,15 @@ export function parseRosterEntry(value: unknown): RosterEntry | null {
   return { playerId, displayName, seat };
 }
 
+/** A goal limit (1 to 50) and length in seconds (up to an hour), either of them null but not both, and the power-ups flag. */
+function parseSettings(goalLimit: unknown, matchSeconds: unknown, powerUps: unknown): MatchSettings | null {
+  if (goalLimit !== null && !(isCount(goalLimit) && goalLimit >= 1 && goalLimit <= GOAL_LIMIT_MAX)) return null;
+  if (matchSeconds !== null && !(isCount(matchSeconds) && matchSeconds >= 1 && matchSeconds <= 3600)) return null;
+  if (goalLimit === null && matchSeconds === null) return null;
+  if (typeof powerUps !== 'boolean') return null;
+  return { goalLimit, matchSeconds, powerUps };
+}
+
 export function parseRoomEvent(value: unknown): RoomEvent | null {
   if (!isRecord(value)) return null;
   switch (value.type) {
@@ -252,14 +279,22 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       }
       if (new Set(gates.map((g) => g.seat)).size !== gates.length) return null;
       if (new Set(gates.map((g) => g.playerId)).size !== gates.length) return null;
-      // A host still running the previous version sends no limit, and plays to 10.
-      const goalLimit = value.goalLimit ?? DEFAULT_GOAL_LIMIT;
-      if (!isCount(goalLimit) || goalLimit < 1 || goalLimit > GOAL_LIMIT_MAX) return null;
+      // A host on older code sends no limits (and played to 10 goals or 2
+      // minutes); null is "no limit".
+      // and no power-ups.
+      const settings = parseSettings(
+        value.goalLimit === undefined ? DEFAULT_GOAL_LIMIT : value.goalLimit,
+        value.matchSeconds === undefined ? DEFAULT_MATCH_SECONDS : value.matchSeconds,
+        value.powerUps ?? false,
+      );
+      if (!settings) return null;
       const protocol = value.protocol ?? 1;
       if (!isCount(protocol) || protocol < 1) return null;
-      const powerUps = value.powerUps ?? false;
-      if (typeof powerUps !== 'boolean') return null;
-      return { type: 'start', gates, goalLimit, protocol, powerUps };
+      return { type: 'start', gates, ...settings, protocol };
+    }
+    case 'settings': {
+      const settings = parseSettings(value.goalLimit, value.matchSeconds, value.powerUps);
+      return settings && { type: 'settings', ...settings };
     }
     case 'closed':
       return { type: 'closed' };

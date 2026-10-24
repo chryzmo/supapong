@@ -3,6 +3,7 @@
 import { ClientGame } from '../game/client';
 import { COUNTDOWN_SECONDS, HostGame } from '../game/host';
 import { paddleInput } from '../game/input';
+import { hudParts } from '../game/hud';
 import { startFrames } from '../game/loop';
 import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
 import { SEAT_COLORS, draw, type RenderView } from '../game/render';
@@ -18,7 +19,13 @@ const FLASH_MS = 600;
 const RESULTS_DELAY_MS = 1500;
 export function matchScreen(session: RoomSession, start: MatchStart, actions: RoomActions): View {
   const { gates } = start;
-  const config = { ...DEFAULT_CONFIG, goalLimit: start.goalLimit, powerUps: start.powerUps };
+  // "No limit" is an infinite one: the end checks need no special case.
+  const config = {
+    ...DEFAULT_CONFIG,
+    goalLimit: start.goalLimit ?? Infinity,
+    matchDuration: start.matchSeconds ?? Infinity,
+    powerUps: start.powerUps,
+  };
   const { room, player, isHost } = session;
   const myGate = gates.findIndex((gate) => gate.playerId === player.id);
   const labels = gates.map((gate, i) => ({ name: gate.displayName, color: SEAT_COLORS[i % SEAT_COLORS.length]! }));
@@ -76,16 +83,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
   const stopFrames = startFrames((now) => {
     const state: GameState = host ? host.view() : client!.view();
     draw(canvas, state, config, renderView(state, now));
-    const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
-    const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-    const mine = state.gates[myGate];
-    const effects = [
-      ...(mine?.wideTicks ? [`wide ${Math.ceil(mine.wideTicks / TICK_RATE)}s`] : []),
-      ...(mine?.shieldTicks ? [`shield ${Math.ceil(mine.shieldTicks / TICK_RATE)}s`] : []),
-    ];
-    hud.textContent = finalScores
-      ? 'Final score'
-      : [`${time} left`, `${state.goals}/${config.goalLimit} goals`, `rally ${Math.max(...state.balls.map((b) => b.rally))}`, ...effects].join(' · ');
+    hud.textContent = finalScores ? 'Final score' : hudParts(state, config, myGate).join(' · ');
   });
 
   function renderView(state: GameState, now: number): RenderView {

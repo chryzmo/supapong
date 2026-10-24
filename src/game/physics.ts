@@ -39,8 +39,9 @@ export interface PhysicsConfig {
   wallJitter: number;
   /** Seconds the ball waits at the center before (re)launching. */
   respawnDelay: number;
+  /** Seconds the match lasts.  Infinity for no time limit. */
   matchDuration: number;
-  /** The match ends once this many goals have been scored in total. */
+  /** The match ends once this many goals have been scored in total.  Infinity for no goal limit. */
   goalLimit: number;
   /**
    * Pickups and their effects (plans/power-ups.md).  Off by default: online

@@ -1,6 +1,7 @@
 // Database calls used by a room session.  They take the client explicitly
 // because a session keeps using the client it was opened with.
 import type { AppClient } from '../supabase';
+import type { MatchSettings } from '../types';
 
 export async function fetchSeatIds(client: AppClient, roomId: string): Promise<string[]> {
   const { data, error } = await client.from('room_players').select('player_id').eq('room_id', roomId);
@@ -27,6 +28,18 @@ export async function removePlayer(client: AppClient, roomId: string, playerId: 
 /** Host only (checked in set_room_status). */
 export async function setRoomStatus(client: AppClient, roomId: string, status: 'playing' | 'finished'): Promise<void> {
   const { error } = await client.rpc('set_room_status', { p_room_id: roomId, p_status: status });
+  if (error) throw error;
+}
+
+/** Host only, before the match (checked in set_match_settings): what ends it (null is "no limit"), and power-ups. */
+export async function setMatchSettings(client: AppClient, roomId: string, settings: MatchSettings): Promise<void> {
+  const { error } = await client.rpc('set_match_settings', {
+    p_room_id: roomId,
+    // Generated RPC types don't know a null is allowed here.
+    p_goal_limit: settings.goalLimit as number,
+    p_match_seconds: settings.matchSeconds as number,
+    p_power_ups: settings.powerUps,
+  });
   if (error) throw error;
 }
 

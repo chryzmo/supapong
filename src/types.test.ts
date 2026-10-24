@@ -3,6 +3,8 @@ import {
   DISPLAY_NAME_MAX,
   MAX_BALLS,
   ROOM_NAME_MAX,
+  describeMatchEnd,
+  matchProtocol,
   parseInputMessage,
   parseRoomEvent,
   parseRosterEntry,
@@ -79,37 +81,52 @@ describe('parseRoomEvent', () => {
   });
 
   it('accepts start, closed and removed', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 2, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2, powerUps: false });
   });
 
   it('keeps the power-ups flag', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 10, protocol: 3, powerUps: true })).toEqual({
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 3, powerUps: true })).toEqual({
       type: 'start',
       gates,
       goalLimit: 10,
+      matchSeconds: 120,
       protocol: 3,
       powerUps: true,
     });
   });
 
   it('treats a start without a protocol (a host on older code) as protocol 1', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 1, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 1, powerUps: false });
   });
 
   it('keeps the bot flag on bot gates', () => {
     const withBot = [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1', bot: true }];
-    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2, powerUps: false });
-    expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10, protocol: 2 })).toEqual({
+    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10, matchSeconds: 120, protocol: 2 })).toEqual({
       type: 'start',
       gates: [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1' }],
       goalLimit: 10,
+      matchSeconds: 120,
       protocol: 2,
       powerUps: false,
     });
   });
 
+  it('reads "no limit" as null, for goals or for time', () => {
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: null, matchSeconds: 600, protocol: 4 })).toMatchObject({ goalLimit: null, matchSeconds: 600 });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, matchSeconds: null, protocol: 4 })).toMatchObject({ goalLimit: 15, matchSeconds: null });
+  });
+
+  it('accepts settings changes from the waiting room', () => {
+    const settings = [
+      { type: 'settings', goalLimit: null, matchSeconds: 300, powerUps: true },
+      { type: 'settings', goalLimit: 25, matchSeconds: 120, powerUps: false },
+    ];
+    for (const event of settings) expect(parseRoomEvent(event)).toEqual(event);
+  });
+
   it('plays to 10 when a start has no goal limit (a host on the previous version)', () => {
-    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, protocol: 1, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 1, powerUps: false });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
     expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
   });
@@ -118,9 +135,16 @@ describe('parseRoomEvent', () => {
     ['an unknown type', { type: 'explode' }],
     ['a start with one gate', { type: 'start', gates: gates.slice(0, 1) }],
     ['a start with no goals to play', { type: 'start', gates, goalLimit: 0 }],
-    ['a start with protocol 0', { type: 'start', gates, goalLimit: 10, protocol: 0 }],
+    ['a start with no limit of either kind', { type: 'start', gates, goalLimit: null, matchSeconds: null }],
+    ['a start with a fractional length', { type: 'start', gates, matchSeconds: 90.5 }],
+    ['a start longer than an hour', { type: 'start', gates, matchSeconds: 3601 }],
+    ['settings with no limit of either kind', { type: 'settings', goalLimit: null, matchSeconds: null, powerUps: true }],
+    ['settings without a length', { type: 'settings', goalLimit: 10, powerUps: true }],
+    ['settings with too many goals', { type: 'settings', goalLimit: 51, matchSeconds: 120, powerUps: true }],
+    ['settings without the power-ups flag', { type: 'settings', goalLimit: 10, matchSeconds: 120 }],
+    ['a start with protocol 0', { type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 0 }],
     ['a start with a power-ups flag that isn\'t a boolean', { type: 'start', gates, goalLimit: 10, powerUps: 'yes' }],
-    ['a start with a fractional protocol', { type: 'start', gates, goalLimit: 10, protocol: 1.5 }],
+    ['a start with a fractional protocol', { type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 1.5 }],
     ['a start with too many goals', { type: 'start', gates, goalLimit: 51 }],
     ['a start with a fractional goal limit', { type: 'start', gates, goalLimit: 2.5 }],
     ['a start with nine gates', { type: 'start', gates: Array.from({ length: 9 }, (_, i) => ({ seat: i % 8, playerId: `p${i}`, displayName: 'P' })) }],
@@ -239,5 +263,22 @@ describe('parseStateMessage', () => {
     ['a fractional shield', { ...state, shield: [0, 0.5, 0] }],
   ])('rejects %s', (_label, value) => {
     expect(parseStateMessage(value)).toBeNull();
+  });
+});
+
+describe('describeMatchEnd', () => {
+  it('names whichever limits there are', () => {
+    expect(describeMatchEnd({ goalLimit: 10, matchSeconds: 120 })).toBe('10 goals or 2 minutes');
+    expect(describeMatchEnd({ goalLimit: 10, matchSeconds: null })).toBe('10 goals');
+    expect(describeMatchEnd({ goalLimit: null, matchSeconds: 600 })).toBe('10 minutes');
+  });
+});
+
+describe('matchProtocol', () => {
+  it('asks only as new a guest as the match needs', () => {
+    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 120 })).toBe(2);
+    expect(matchProtocol({ powerUps: true, goalLimit: 10, matchSeconds: 120 })).toBe(3);
+    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 300 })).toBe(4);
+    expect(matchProtocol({ powerUps: false, goalLimit: null, matchSeconds: 120 })).toBe(4);
   });
 });

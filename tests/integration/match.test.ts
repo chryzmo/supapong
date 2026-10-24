@@ -43,7 +43,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   const [hostPlayer, ...guestPlayers] = players as [TestPlayer, ...TestPlayer[]];
   const { data: roomId, error } = await hostPlayer.client.rpc('create_room', { p_name: 'Match test', p_max_players: 4 });
   if (error) throw error;
-  const base: SeatedRoom = { id: roomId, name: 'Match test', hostId: hostPlayer.id, maxPlayers: 4, goalLimit: 10, powerUps: true, seat: 0 };
+  const base: SeatedRoom = { id: roomId, name: 'Match test', hostId: hostPlayer.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 0 };
 
   const open = (player: TestPlayer, seat: number) => {
     const session = new RoomSession({ ...base, seat }, { id: player.id, displayName: player.name }, {
