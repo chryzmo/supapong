@@ -25,6 +25,11 @@ $$;
 create function pg_temp.room() returns uuid language sql as $$
   select id from public.rooms where name = 'Test room';
 $$;
+-- Every statement here shares one transaction, so now() never moves and
+-- each match would look instant.  This moves its start back instead.
+create function pg_temp.backdate(p_room uuid) returns void language sql security definer as $$
+  update public.rooms set started_at = started_at - interval '10 minutes' where id = p_room;
+$$;
 grant execute on all functions in schema pg_temp to authenticated, anon;
 
 -- create_room ------------------------------------------------------------------
@@ -107,6 +112,7 @@ select throws_ok(
   '42501', null, 'only the host can record the result');
 
 select pg_temp.login('00000000-0000-0000-0000-00000000000a');
+select pg_temp.backdate(pg_temp.room());
 select throws_ok(
   $$ insert into public.match_results (room_id, scores) values (pg_temp.room(), '{}') $$,
   '42501', null, 'results cannot be inserted directly, even by the host');

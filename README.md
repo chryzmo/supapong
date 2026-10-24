@@ -153,7 +153,7 @@ The tests don't cover the DOM screens themselves.  Those are checked by hand in 
 
 These are deliberate trade-offs for a prototype.  Each one is noted where it lives in the code.
 
-- **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.
+- **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.  The database only checks that a result is plausible: points only for players seated at the start, no more points than the goal limit, and not sooner than the match could have lasted.  A host can still report a believable result that didn't happen.  `plans/anti-cheat.md` has the next steps.
 - **Seated players can spoof each other's inputs.** Room channels are private: outsiders can't join, and only the host can broadcast state and events.  But a Broadcast message doesn't carry its sender, so a guest's `input` claims a seat number the host can't verify.  A seated player could move someone else's paddle, or claim saves in their name.
 - **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **Guests decide their own saves.** A guest's claim is checked for plausibility, not proof, so a modified client could claim saves it didn't make.  That's the anti-cheat non-goal again.

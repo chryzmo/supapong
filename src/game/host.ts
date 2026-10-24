@@ -33,6 +33,7 @@ import {
   type GameState,
   type PhysicsConfig,
   type PhysicsEvent,
+  wrapAngle,
 } from './physics';
 import { encodeState } from './snapshot';
 
@@ -48,6 +49,15 @@ const MAX_CATCH_UP_TICKS = 15;
 export const CLAIM_WINDOW_TICKS = 15;
 /** A claimed paddle may be at most this many seconds of travel from where the host had it. */
 const CLAIM_SLACK_SECONDS = 0.4;
+/**
+ * How far the host will move a guest's paddle to where the guest says it is,
+ * beyond what their inputs moved it: at most this many seconds of paddle
+ * travel at once, coming back at ADOPT_REFILL seconds per second.  An honest
+ * guest is only ever a network delay ahead of the host's copy, so they need
+ * little.  A cheating one could otherwise teleport.
+ */
+export const ADOPT_BURST_SECONDS = 0.25;
+const ADOPT_REFILL = 0.5;
 
 /** One tick, kept so the host can replay from it. */
 interface TickRecord {
@@ -101,6 +111,8 @@ export class HostGame {
   /** The official score: everything but pending goals.  This is what everyone sees. */
   private readonly scores: number[];
   private goals = 0;
+  /** Per gate: how much paddle travel (in seconds) the host may still adopt from that guest, as of `tick`. */
+  private readonly adoption: { budget: number; tick: number }[];
 
   constructor(
     private readonly output: HostOutput,
@@ -114,6 +126,7 @@ export class HostGame {
     this.state = options.state ?? { ...createGame(gates.length, seed, this.config), respawnTicks: COUNTDOWN_SECONDS * TICK_RATE };
     this.prev = this.state;
     this.inputs = gates.map(() => 0);
+    this.adoption = gates.map(() => ({ budget: ADOPT_BURST_SECONDS, tick: 0 }));
     this.scores = [...this.state.scores];
     this.goals = this.state.goals;
     // Pending goals are timed in state ticks, so count from the same place.
@@ -144,14 +157,26 @@ export class HostGame {
    * A player's input, by seat.  If it says where their paddle is, take their
    * word for it (kept inside their gate): the player's screen is the truth
    * for their own paddle, and the host's copy would otherwise run on past
-   * where they stopped by however long the message took.
+   * where they stopped by however long the message took.  But only so far:
+   * no more than an honest network delay's worth of travel (see
+   * ADOPT_BURST_SECONDS), so a modified client can't teleport its paddle.
    */
   applyInput(seat: number, dir: Dir, paddle?: number): void {
     const gate = this.gates.findIndex((g) => g.seat === seat);
     if (gate === -1 || gate === this.myGate || this.gates[gate]!.bot) return;
     this.inputs[gate] = dir;
     if (paddle === undefined || !this.state.gates[gate]?.active) return;
-    const placed = movePaddle(paddle, gate, this.gates.length, 0, 0, this.config);
+    const n = this.gates.length;
+    const allowance = this.adoption[gate]!;
+    allowance.budget = Math.min(ADOPT_BURST_SECONDS, allowance.budget + (this.ticksRun - allowance.tick) * DT * ADOPT_REFILL);
+    allowance.tick = this.ticksRun;
+    const speed = this.config.paddleSpeed * 2 * gateHalfWidth(n, this.config);
+    const current = this.state.gates[gate]!.paddle;
+    const wanted = angleDiff(movePaddle(paddle, gate, n, 0, 0, this.config), current);
+    const most = allowance.budget * speed;
+    const moved = Math.max(-most, Math.min(most, wanted));
+    allowance.budget -= Math.abs(moved) / speed;
+    const placed = wrapAngle(current + moved);
     this.state = { ...this.state, gates: this.state.gates.map((g, i) => (i === gate ? { ...g, paddle: placed } : g)) };
   }
 

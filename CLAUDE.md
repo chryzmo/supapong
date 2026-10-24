@@ -14,7 +14,7 @@ Multiplayer Pong on a circular board.  Each player defends a goal gate on the ri
 - Real accounts (email, OAuth)
 - Dynamic gate resizing while a match is running
 - Free-roaming paddles
-- Anti-cheat or server-authoritative physics
+- Server-authoritative physics.  Anti-cheat is limited to plausibility checks for now (see `plans/anti-cheat.md`)
 - Host migration
 
 ## Stack
@@ -47,7 +47,9 @@ rooms (
   max_players int not null check (max_players between 2 and 8),
   goal_limit int not null default 10 check (goal_limit between 1 and 50),  -- goals in total that end the match
   status text not null default 'waiting' check (status in ('waiting','playing','finished')),
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  started_at timestamptz,     -- set by set_room_status('playing')
+  starting_players uuid[]     -- who was seated then; set by set_room_status('playing')
 )
 
 room_players (
@@ -76,9 +78,9 @@ match_results (
 ### RLS
 
 - `profiles`: anyone authenticated can read.  You can only insert or update your own row.
-- `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.
+- `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`, `status = 'waiting'`, and `started_at` and `starting_players` left empty, so a room can only start through `set_room_status`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.  Going to `playing` records `started_at` and `starting_players`.
 - `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players, goal_limit = 10)`, which creates the room and seats the host in one transaction.
-- `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result (with the room name and players' names from `profiles`) and sets the room to `finished`, all in one transaction.
+- `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result (with the room name and players' names from `profiles`) and sets the room to `finished`, all in one transaction.  The scores must be plausible: only for `starting_players`, adding up to no more than `goal_limit`, and no sooner than the match could have lasted (3 s of countdown plus 1 s per point since `started_at`).
 
 ### Realtime
 
@@ -86,7 +88,7 @@ match_results (
 - **Lobby:** subscribe to Postgres Changes on `rooms` and `room_players`, and refetch `lobby_rooms` whenever one fires.  This is simple and the traffic is low.  Any signed-in player can read the `lobby` channel; nobody can broadcast on it.
 - **Room channels** `room:{id}` and `room:{id}:input`.  Only seated players can join either.  Policies can't tell broadcast events apart, so traffic is split by sender: only the host may broadcast on `room:{id}`, and inputs go on `room:{id}:input`.
   - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
-  - **Broadcast `input`** (client → all, on `room:{id}:input`): `{ seat, dir: -1 | 0 | 1, paddle, save? }`.  Send it when the direction changes, and every 200 ms while moving (`RESEND_MS`), never while still.  `paddle` is where the player has their paddle on screen.  Only the host acts on it: it adopts the position (kept inside the gate), so its copy doesn't overshoot after a key is released.
+  - **Broadcast `input`** (client → all, on `room:{id}:input`): `{ seat, dir: -1 | 0 | 1, paddle, save? }`.  Send it when the direction changes, and every 200 ms while moving (`RESEND_MS`), never while still.  `paddle` is where the player has their paddle on screen.  Only the host acts on it: it adopts the position (kept inside the gate), so its copy doesn't overshoot after a key is released.  It moves the paddle at most 0.25 s of travel at once beyond what the inputs did, with that allowance coming back at half a second per second (`ADOPT_BURST_SECONDS`), so a modified client can't teleport its paddle.
   - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, seed, respawn, rally }` (`touch` is the last gate to hit the ball, or -1; `seed` is the host's PRNG state), arrays in gate order, numbers rounded to 4 decimals (under 300 bytes at 8 players).
   - **Broadcast `event`** (host → all): `start` (carries the gate order, `gates: { seat, playerId, displayName, bot? }[]`, and the room's `goalLimit`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate, scorer? }`, for the flash; `scorer` is left out when nobody got the point) and `end` (`{ scores }`).
 
@@ -160,6 +162,7 @@ supabase/
   seed.sql
 tests/integration/   app modules against the local stack
 scripts/check.sh     what `npm run check` and the pre-commit hook run
+plans/               designs for work not started yet; delete a plan once it ships
 .github/workflows/   CI: check, then migrate and deploy from main
 ```
 

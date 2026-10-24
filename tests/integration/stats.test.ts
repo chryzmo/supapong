@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createRoom, joinRoom } from '../../src/lobby/api';
 import { finishMatch, setRoomStatus } from '../../src/room/api';
 import { fetchLeaderboard, fetchRecentMatches, fetchStanding } from '../../src/stats/api';
-import { actAs, createPlayer, type TestPlayer } from './helpers';
+import { actAs, backdateStart, createPlayer, type TestPlayer } from './helpers';
 
 vi.mock('../../src/supabase', () => import('./helpers').then((m) => m.appSupabaseModule));
 
@@ -23,6 +23,7 @@ async function play(roomName: string, scores: [TestPlayer, number][]): Promise<v
     await joinRoom(roomId);
   }
   await setRoomStatus(host!.client, roomId, 'playing');
+  await backdateStart(roomId); // finish_match refuses a match quicker than its points could take.
   await finishMatch(host!.client, roomId, Object.fromEntries(scores.map(([player, points]) => [player.id, points])));
 }
 
@@ -33,7 +34,7 @@ beforeAll(async () => {
     [bob, 7],
   ]);
   await play('Rematch', [
-    [ada, 10],
+    [ada, 6],
     [bob, 2],
     [cy, 2],
   ]);
@@ -43,7 +44,7 @@ describe('fetchStanding', () => {
   it("returns a player's totals", async () => {
     actAs(cy);
     expect(await fetchStanding(ada.id)).toEqual(
-      expect.objectContaining({ displayName: 'Ada', matches: 2, wins: 1, points: 13 }),
+      expect.objectContaining({ displayName: 'Ada', matches: 2, wins: 1, points: 9 }),
     );
   });
 
@@ -77,7 +78,7 @@ describe('fetchRecentMatches', () => {
       [
         'Rematch',
         [
-          ['Ada', 10, 1, true],
+          ['Ada', 6, 1, true],
           ['Bob', 2, 2, false],
           ['Cy', 2, 2, false],
         ],

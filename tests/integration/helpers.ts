@@ -56,6 +56,15 @@ export async function createPlayer(name: string): Promise<TestPlayer> {
   return { id, name, client };
 }
 
+/** Moves a playing room's start back, as if its match had run for `minutes`. */
+export async function backdateStart(roomId: string, minutes = 10): Promise<void> {
+  const { data, error } = await admin.from('rooms').select('started_at').eq('id', roomId).single();
+  if (error) throw error;
+  const started = new Date(data.started_at ?? Date.now()).getTime() - minutes * 60_000;
+  const { error: updateError } = await admin.from('rooms').update({ started_at: new Date(started).toISOString() }).eq('id', roomId);
+  if (updateError) throw updateError;
+}
+
 /** Removes an auth user at the end of the file (for users a test created itself). */
 export function cleanupUser(id: string): void {
   created.push(id);

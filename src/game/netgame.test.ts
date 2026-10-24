@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Gate, RoomEvent, StateMessage } from '../types';
 import { ClientGame, RESEND_MS } from './client';
-import { CLAIM_WINDOW_TICKS, COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
+import { ADOPT_BURST_SECONDS, CLAIM_WINDOW_TICKS, COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
 import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleTravel, type GameState, type PhysicsConfig } from './physics';
 import { INTERP_DELAY_MS } from './snapshot';
 
@@ -87,9 +87,51 @@ describe('HostGame', () => {
     host.applyInput(5, 0, gateCenter(2, 3) + 0.1); // Seat 5 is gate 2.
     advance(50);
     expect(states.at(-1)!.paddles[2]).toBeCloseTo(gateCenter(2, 3) + 0.1, 3);
+    advance(1000);
+    host.applyInput(5, 0, gateCenter(2, 3) + 0.45);
+    advance(1000);
     host.applyInput(5, 0, gateCenter(2, 3) + 3); // Way outside the gate: kept at its edge.
     advance(50);
     expect(states.at(-1)!.paddles[2]).toBeCloseTo(gateCenter(2, 3) + paddleTravel(3, DEFAULT_CONFIG), 3);
+  });
+
+  describe("adopting a guest's paddle", () => {
+    const speed = DEFAULT_CONFIG.paddleSpeed * 2 * gateHalfWidth(3, DEFAULT_CONFIG);
+    const burst = ADOPT_BURST_SECONDS * speed;
+    const offset = (paddles: number[]) => paddles[2]! - gateCenter(2, 3);
+
+    it('moves it at most a network delay of travel at once', () => {
+      const { host, states, advance } = hostHarness();
+      host.applyInput(5, 0, gateCenter(2, 3) + paddleTravel(3, DEFAULT_CONFIG)); // Center to edge in one go.
+      advance(SNAPSHOT_EVERY * TICK_MS);
+      expect(offset(states.at(-1)!.paddles)).toBeCloseTo(burst, 3);
+    });
+
+    it("doesn't let a stream of inputs add up to a teleport", () => {
+      const { host, states, advance } = hostHarness();
+      const edge = gateCenter(2, 3) - paddleTravel(3, DEFAULT_CONFIG);
+      // A modified client claiming the edge every tick for 12 ticks.
+      for (let i = 0; i < 12; i++) {
+        host.applyInput(5, 0, edge);
+        advance(TICK_MS);
+      }
+      // The burst, plus what came back over the 11 ticks between the first input and the last.
+      expect(-offset(states.at(-1)!.paddles)).toBeCloseTo(burst + 0.5 * speed * 11 * DT, 3);
+      expect(-offset(states.at(-1)!.paddles)).toBeLessThan(paddleTravel(3, DEFAULT_CONFIG));
+    });
+
+    it('keeps up with an honest guest a network delay ahead', () => {
+      const { host, states, advance } = hostHarness();
+      // The guest holds right for 300 ms, and the host hears it 100 ms late:
+      // the guest is already 0.1 s of travel along when the first input lands.
+      host.applyInput(5, 1, gateCenter(2, 3) + speed * 0.1);
+      advance(100);
+      host.applyInput(5, 1, gateCenter(2, 3) + speed * 0.2);
+      advance(100);
+      host.applyInput(5, 0, gateCenter(2, 3) + speed * 0.3); // Released.
+      advance(SNAPSHOT_EVERY * TICK_MS);
+      expect(offset(states.at(-1)!.paddles)).toBeCloseTo(speed * 0.3, 3);
+    });
   });
 
   it("moves the host's own paddle from local input", () => {

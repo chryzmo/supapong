@@ -97,14 +97,14 @@ isOneToOne: false
                   ]
                 },"rooms": {
                   Row: {
-                    "created_at": string,"goal_limit": number,"host_id": string,"id": string,"max_players": number,"name": string,"status": string
+                    "created_at": string,"goal_limit": number,"host_id": string,"id": string,"max_players": number,"name": string,"started_at": string | null,"starting_players": (string)[] | null,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"goal_limit"?: number,"host_id": string,"id"?: string,"max_players": number,"name": string,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number,"host_id": string,"id"?: string,"max_players": number,"name": string,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
                   }
                   Update: {
-                    "created_at"?: string,"goal_limit"?: number,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"started_at"?: string | null,"starting_players"?: (string)[] | null,"status"?: string
                   }
                   Relationships: [
                     {
