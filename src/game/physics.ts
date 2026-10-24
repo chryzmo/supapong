@@ -341,6 +341,8 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   // Balls move one after another, in order, so the PRNG (wall bounces) is
   // used in the same order every time.
   const balls: BallState[] = [];
+  /** Multiball's new balls, added after every ball has moved, so they're always last. */
+  const split: BallState[] = [];
   let scores = next.scores;
   let goals = next.goals;
   let seed = next.seed;
@@ -364,12 +366,12 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
     if (pickup && owner >= 0 && pathMeets(moved.path, pickup, config.pickupRadius + config.ballRadius)) {
       const active = gates[owner]?.active === true;
       // Multiball with no room for more balls gives a wide paddle instead.
-      const room = config.maxBalls - balls.length - (state.balls.length - index - 1);
+      const room = config.maxBalls - balls.length - split.length - (state.balls.length - index - 1);
       const kind: PickupKind = pickup.kind === 'multiball' && room <= 0 ? 'wide' : pickup.kind;
       events.push({ type: 'pickup', kind: pickup.kind, gate: active ? owner : -1, ball: index });
       if (active && kind === 'wide') gates = gates.map((g, i) => (i === owner ? { ...g, wideTicks: Math.round(config.wideDuration * TICK_RATE) } : g));
       if (active && kind === 'shield') gates = gates.map((g, i) => (i === owner ? { ...g, shieldTicks: Math.round(config.shieldDuration * TICK_RATE) } : g));
-      if (active && kind === 'multiball') balls.push(...splitBall(moved.ball, Math.min(2, room)));
+      if (active && kind === 'multiball') split.push(...splitBall(moved.ball, Math.min(2, room)));
       pickup = undefined;
     }
 
@@ -390,6 +392,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
     }
   }
 
+  balls.push(...split);
   next = { ...next, gates, balls, scores, goals, seed };
   if (config.powerUps) {
     next.pickupTimer = pickupTimer ?? 0;

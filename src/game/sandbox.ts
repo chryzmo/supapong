@@ -2,6 +2,7 @@
 // sliders for tuning the physics live.  No network.
 import { MAX_PLAYERS, MIN_PLAYERS } from '../types';
 import { h, type View } from '../ui';
+import { Announcer } from './announce';
 import { botInput } from './bot';
 import { paddleInput } from './input';
 import { hudParts } from './hud';
@@ -74,6 +75,7 @@ export function sandboxScreen(actions: SandboxActions): View {
   let state = newGame();
   let prev = state;
   let flash: { gate: number; scorer: number; until: number } | undefined;
+  const announcer = new Announcer();
   let over = false;
   let paused = false;
 
@@ -205,9 +207,11 @@ export function sandboxScreen(actions: SandboxActions): View {
     },
     (alpha) => {
       const shown = interpolate(prev, state, alpha);
+      const announced = announcer.next(shown, performance.now(), labels());
       draw(canvas, shown, config, {
         labels: labels(),
         viewerGate: 0,
+        ...(announced ? { announcement: announced } : {}),
         ...(flash && state.tick < flash.until ? { flashGate: flash.gate, ...(flash.scorer >= 0 ? { scorerGate: flash.scorer } : {}) } : {}),
         ...(over ? { centerText: 'Match over' } : state.tick < config.respawnDelay * TICK_RATE ? { centerText: 'Ready' } : {}),
       });

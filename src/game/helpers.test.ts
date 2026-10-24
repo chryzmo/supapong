@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Announcer, announcement, collected } from './announce';
 import { botInput } from './bot';
 import { hudParts } from './hud';
 import { TOUCH_LEFT, TOUCH_RIGHT, dirFromKeys } from './input';
@@ -167,5 +168,65 @@ describe('hudParts', () => {
     const powered = { ...state, gates: state.gates.map((g, i) => (i === 0 ? { ...g, wideTicks: 90, shieldTicks: 600 } : g)) };
     expect(hudParts(powered, config, 0).slice(3)).toEqual(['wide 2s', 'shield 10s']);
     expect(hudParts(powered, config, 1).slice(3)).toEqual([]);
+  });
+});
+
+describe('collected', () => {
+  const base: GameState = { ...createGame(4, 1, config), respawnTicks: 0, balls: [{ x: 0.3, y: 0, vx: 1, vy: 0, lastTouch: 2, rally: 1 }] };
+  const withGate = (state: GameState, gate: number, changes: Partial<GameState['gates'][number]>): GameState => ({
+    ...state,
+    gates: state.gates.map((g, i) => (i === gate ? { ...g, ...changes } : g)),
+  });
+
+  it('spots a new wide paddle or shield, including one that resets the clock', () => {
+    expect(collected(base, withGate(base, 1, { wideTicks: 480 }))).toEqual([{ gate: 1, kind: 'wide' }]);
+    expect(collected(withGate(base, 1, { wideTicks: 100 }), withGate(base, 1, { wideTicks: 480 }))).toEqual([{ gate: 1, kind: 'wide' }]);
+    expect(collected(base, withGate(base, 3, { shieldTicks: 900 }))).toEqual([{ gate: 3, kind: 'shield' }]);
+  });
+
+  it('spots a multiball, for the last toucher of the new balls', () => {
+    const split = { ...base, balls: [...base.balls, ...base.balls, ...base.balls] };
+    expect(collected(base, split)).toEqual([{ gate: 2, kind: 'multiball' }]);
+  });
+
+  it('ignores effects running down or breaking, and balls going in', () => {
+    expect(collected(withGate(base, 1, { wideTicks: 10 }), withGate(base, 1, { wideTicks: 9 }))).toEqual([]);
+    expect(collected(withGate(base, 1, { shieldTicks: 10 }), base)).toEqual([]);
+    expect(collected({ ...base, balls: [...base.balls, ...base.balls] }, base)).toEqual([]);
+  });
+
+  it('agrees with the physics about every token collected in a game', () => {
+    const powered = { ...config, powerUps: true, pickupMinSeconds: 1, pickupMaxSeconds: 2, pickupVolley: 3 };
+    let state = createGame(4, 5, powered);
+    let seen = 0;
+    for (let t = 0; t < 60 * 120; t++) {
+      const result = step(state, state.gates.map((_, i) => botInput(state, i, powered, 0.9)), powered);
+      const fromPhysics = result.events.flatMap((e) =>
+        e.type === 'pickup' && e.gate >= 0 ? [{ gate: e.gate, kind: e.kind === 'multiball' && result.state.balls.length <= state.balls.length ? 'wide' : e.kind }] : [],
+      );
+      expect(collected(state, result.state)).toEqual(fromPhysics);
+      seen += fromPhysics.length;
+      state = result.state;
+    }
+    expect(seen).toBeGreaterThan(5);
+  });
+});
+
+describe('Announcer', () => {
+  const labels = [0, 1, 2, 3].map((i) => ({ name: `P${i}`, color: `#00000${i}` }));
+  const before: GameState = createGame(4, 1, config);
+  const after: GameState = { ...before, gates: before.gates.map((g, i) => (i === 2 ? { ...g, shieldTicks: 900 } : g)) };
+
+  it("names the collector in their color, then fades and goes", () => {
+    const announcer = new Announcer();
+    expect(announcer.next(before, 0, labels)).toBeUndefined();
+    expect(announcer.next(after, 100, labels)).toEqual({ text: 'P2: shield!', color: '#000002', alpha: 1 });
+    expect(announcer.next(after, 1500, labels)?.alpha).toBeCloseTo(0.5);
+    expect(announcer.next(after, 1700, labels)).toBeUndefined();
+  });
+
+  it('words each kind', () => {
+    expect(announcement('Ada', 'wide')).toBe('Ada: wide paddle!');
+    expect(announcement('Ada', 'multiball')).toBe('Ada: multiball!');
   });
 });

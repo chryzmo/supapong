@@ -1,5 +1,6 @@
 // The match screen.  The host runs the game (HostGame); everyone else
 // renders the host's snapshots (ClientGame).  Both draw the same way.
+import { Announcer } from '../game/announce';
 import { ClientGame } from '../game/client';
 import { COUNTDOWN_SECONDS, HostGame } from '../game/host';
 import { paddleInput } from '../game/input';
@@ -35,6 +36,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
   const leave = leaveButton(session, actions, isHost ? 'End match' : 'Leave match');
 
   let flash: { gate: number; scorer: number; until: number } | undefined;
+  const announcer = new Announcer();
   let finalScores: number[] | undefined;
   let resultsTimer: ReturnType<typeof setTimeout> | undefined;
   const onGoal = (gate: number, scorer: number): void => {
@@ -88,6 +90,8 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
 
   function renderView(state: GameState, now: number): RenderView {
     const view: RenderView = { labels, viewerGate: myGate >= 0 ? myGate : null };
+    const announced = announcer.next(state, now, labels);
+    if (announced) view.announcement = announced;
     if (flash && now < flash.until) {
       view.flashGate = flash.gate;
       if (flash.scorer >= 0) view.scorerGate = flash.scorer;

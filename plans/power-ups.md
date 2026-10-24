@@ -129,7 +129,6 @@ About a day.
 
 ### Later
 
-- **Show who collected what:** a token just vanishes today.  A short "Ada: shield!" in their color over the board, maybe with a flash on their gate.  The host already gets a `pickup` event from the physics; guests would get it as a room event.
 - **Tune from real play:** in bot games most shields expire unused, and fewer than half the tokens get collected.  Try longer shields or bigger tokens in the sandbox.
 - **Separate standings:** if power-ups swing results, record the mode on `match_results` and let the leaderboard filter by it.
 - **More power-ups:** Magnet (catch and hold, release when you stop moving or after 1 s), Fast ball, Curve, Shrink others.

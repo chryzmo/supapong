@@ -30,6 +30,8 @@ export interface RenderView {
   scorerGate?: number;
   /** Big text in the middle, e.g. a countdown. */
   centerText?: string;
+  /** A short line above the middle, e.g. who just collected a token; `alpha` fades it out. */
+  announcement?: { text: string; color: string; alpha: number };
 }
 
 /** Sizes the canvas's backing store to its CSS size times devicePixelRatio, so lines stay crisp. */
@@ -185,6 +187,18 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.fillStyle = TEXT;
     ctx.font = `700 ${Math.round(R * 0.16)}px system-ui, sans-serif`;
     ctx.fillText(view.centerText, cx, cy);
+  }
+
+  if (view.announcement) {
+    const { text, color, alpha } = view.announcement;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.font = `700 ${Math.max(14, Math.round(R * 0.08))}px system-ui, sans-serif`;
+    ctx.fillText(text, cx, cy - R * 0.4);
+    ctx.restore();
   }
 }
 
