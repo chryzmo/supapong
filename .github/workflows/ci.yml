@@ -36,7 +36,17 @@ jobs:
       - run: npx supabase start -x studio,imgproxy,storage-api,edge-runtime,logflare,vector,supavisor,mailpit
       - run: npm run check
 
-  deploy:
+  # Applies new migrations to the hosted database, as its own job so it shows
+  # up on its own in the run and a failed deploy can be re-run without it.
+  # It runs before deploy, so the new frontend never calls tables or
+  # functions that aren't there yet.  The old frontend stays live meanwhile
+  # (and if the deploy fails), so every migration has to work with it too.
+  #
+  # GitHub's runners have no IPv6 and the database's direct host is
+  # IPv6-only, so the CLI looks up the IPv4 pooler.  The token needs Database
+  # read-write (for the CLI's temporary login role) and Connection Pooling
+  # read.
+  migrate:
     needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -48,21 +58,29 @@ jobs:
         with:
           node-version-file: .node-version
           cache: npm
+      # For the Supabase CLI, pinned in package.json.
       - run: npm ci
-      # Migrations go first, so the new frontend never calls tables or
-      # functions that aren't there yet.  If one fails, nothing is deployed.
-      # The old frontend stays live meanwhile (and if the deploy fails), so
-      # every migration has to work with it too.
-      #
-      # GitHub's runners have no IPv6 and the database's direct host is
-      # IPv6-only, so the CLI looks up the IPv4 pooler.  The token needs
-      # Database read-write (for the CLI's temporary login role) and
-      # Connection Pooling read.
       - name: Apply new migrations to the hosted database
         run: make db-push
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+
+  # Only runs once the migrations are in.  If migrate fails, nothing is
+  # deployed.
+  deploy:
+    needs: migrate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
       # Builds with the hosted values, refuses a build that points at the local
       # stack or uses Turnstile's test key, then uploads dist/.
       - run: make deploy-web
