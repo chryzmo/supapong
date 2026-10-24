@@ -50,7 +50,7 @@ select is(
 
 reset role;
 set local role anon;
-select is((select count(*)::int from public.profiles), 0, 'signed-out callers see no profiles');
+select throws_ok('select count(*) from public.profiles', '42501', null, 'signed-out callers cannot read profiles');
 
 select * from finish();
 rollback;

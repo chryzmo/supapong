@@ -80,8 +80,9 @@ select is(
 
 -- set_room_status --------------------------------------------------------------
 select pg_temp.login('00000000-0000-0000-0000-00000000000d');
-update public.rooms set status = 'finished' where id = pg_temp.room();
-select is((select status from public.rooms where id = pg_temp.room()), 'waiting', 'rooms cannot be updated directly');
+select throws_ok(
+  $$ update public.rooms set status = 'finished' where id = pg_temp.room() $$,
+  '42501', null, 'rooms cannot be updated directly');
 select throws_ok(
   $$ select public.set_room_status(pg_temp.room(), 'playing') $$,
   '42501', null, 'only the host can change status');
@@ -190,8 +191,8 @@ select throws_ok(
 select throws_ok(
   $$ select public.set_room_status('00000000-0000-0000-0000-000000000000', 'playing') $$,
   '42501', null, 'signed-out callers cannot call set_room_status');
-select is((select count(*)::int from public.rooms), 0, 'signed-out callers see no rooms');
-select is((select count(*)::int from public.lobby_rooms), 0, 'signed-out callers see an empty lobby');
+select throws_ok('select count(*) from public.rooms', '42501', null, 'signed-out callers cannot read rooms');
+select throws_ok('select count(*) from public.lobby_rooms', '42501', null, 'signed-out callers cannot read the lobby');
 
 select * from finish();
 rollback;
