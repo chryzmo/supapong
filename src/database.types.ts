@@ -135,7 +135,10 @@ isOneToOne: false
                 }
           }
           Functions: {
-            "create_room":
+            "cleanup":
+{ Args: Record<PropertyKey, never>; Returns: Json
+                           },
+"create_room":
 { Args: { "p_max_players": number,"p_name": string }; Returns: string
                            },
 "finish_match":

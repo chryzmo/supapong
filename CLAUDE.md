@@ -87,6 +87,10 @@ match_results (
   - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
   - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
 
+### Cleanup
+
+- A `pg_cron` job runs `public.cleanup()` every 15 minutes.  It deletes rooms older than 2 hours (seats cascade, results keep `room_id = null`), anonymous users with no session activity for 7 days, and `cron.job_run_details` older than 7 days.  Only the database owner can call it.
+
 ### Host-authoritative simulation
 
 - The room creator's browser runs physics at a fixed 60 Hz and broadcasts snapshots.  Its timer runs in a Web Worker, because browsers throttle page timers in background tabs and a hidden host tab would otherwise freeze the match.  If it falls more than 15 ticks behind, it skips ahead.

@@ -88,6 +88,7 @@ sequenceDiagram
 | Who is actually connected | **Realtime Presence** | The database knows who holds a seat, not who is online.  Presence is tied to the socket, so a closed tab or a dropped network shows up as a leave, with no heartbeat code of ours. | [`src/room/session.ts`](src/room/session.ts) |
 | Game traffic: inputs, snapshots, room events | **Realtime Broadcast** | These only matter to people connected right now, so writing them to a table would be wasted work.  Broadcast sends them straight to the other sockets on the channel. | same, and [`src/game/`](src/game/) |
 | Only seated players in a room's channels, only the host sends game state | **Realtime Authorization** (private channels) | RLS policies on `realtime.messages` are checked when a client joins, against the same `room_players` and `rooms` tables as everything else.  Policies can tell broadcast from presence but not one event from another, so traffic is split by sender: on `room:{id}` only the host may broadcast, and inputs go on `room:{id}:input`.  The lobby channel is private too (read only), so the project refuses public channels altogether. | [`private_room_channels.sql`](supabase/migrations/20261024020243_private_room_channels.sql) |
+| Tidy up without a server | **pg_cron** | Abandoned rooms and throwaway anonymous users would otherwise pile up, since in-game cleanup depends on a host's browser.  A scheduled SQL function inside Postgres runs every 15 minutes: rooms older than 2 hours go (seats with them, results stay), and so do anonymous users idle for 7 days.  No Edge Function, no external scheduler. | [`cleanup_job.sql`](supabase/migrations/20261024022239_cleanup_job.sql) |
 | Schema you can review, reproduce and test | **Supabase CLI**: migrations, local stack, `supabase test db` (pgTAP), `gen types` | Every schema change is a migration file.  The local stack runs the same Postgres, Auth and Realtime as production.  RLS and RPCs have SQL tests, and `src/database.types.ts` is generated, so queries are type-checked. | [`supabase/`](supabase/) |
 
 Deliberately not used yet:
@@ -129,7 +130,7 @@ npm run check   # everything below; the pre-commit hook runs this
 | Layer | Tool | What it covers |
 |---|---|---|
 | Unit (`src/**/*.test.ts`) | Vitest | Physics (including a 20,000-tick determinism and containment test), bots, interpolation, snapshot encoding and buffering, host and client with a fake clock and network, message parsers, Presence logic, standings |
-| Database (`supabase/tests/database/`) | pgTAP via `supabase test db` | Every RLS policy, constraint and RPC: who can do what, error codes, status transitions, result validation |
+| Database (`supabase/tests/database/`) | pgTAP via `supabase test db` | Every RLS policy (tables and private channels), table grants, constraints and RPCs: who can do what, error codes, status transitions, result validation, and the cleanup job |
 | Integration (`tests/integration/`) | Vitest against the local stack | The app's own modules acting as several players: sign-in, lobby queries, the 12-way join race, live lobby updates, Presence and seat cleanup, and full networked matches where results get recorded |
 | Typecheck and schema drift | `tsc`, `supabase gen types` | Strict TypeScript, and generated types matching the local schema |
 
@@ -146,10 +147,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
 - **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **You see your paddle "now" and the ball 100 ms ago.** On a slow connection, a save that looked like a hit on your screen can be a goal on the host.  That's the usual price of interpolating everything except your own paddle.
 - **Launches are aimed at gates.** An early version launched in any direction.  A launch into a wall travels along a diameter, and a plain bounce keeps it there.  With an even number of gates every wall faces another wall, so about 40% of launches with 2 or 4 gates bounced out of everyone's reach forever.  Launches now aim at a random point inside a random active gate, so each one reaches a player in about 1.6 s.  Wall bounces also add a small random turn (±5°), so later rallies can't settle on a diameter either.
-- **Cleanup happens in browsers.**
-  - Seat removal is the host's job.
-  - Waiting rooms whose host vanished stay in the database, hidden from the lobby after an hour.
-  - Finished rooms and their seats are never deleted.
+- **Live cleanup happens in browsers.** Removing a disconnected player's seat is the host's job, and a match whose host vanished just stops.  The `pg_cron` job is the backstop: it deletes any room older than 2 hours, and anonymous users idle for 7 days.  A deleted player's id stays in old `match_results.scores`, with no name to go with it.
 - **Anonymous sign-in is behind a CAPTCHA, and that's all.** Turnstile stops scripted sign-ups, and Supabase's per-IP rate limit backs it up.  The local config raises that limit to 100 an hour for testing.
 - **Players are anonymous.** Clearing the tab's storage means a new identity.  Accounts would come from linking anonymous users to email or OAuth.
 
@@ -157,7 +155,7 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
 
 - **Authority moves to a server.** A dedicated game process (a small Node or Go service, or a managed game server) would run the physics.  Supabase would keep handling identity, rooms, results and the lobby, and could keep carrying the traffic over Broadcast.  Edge Functions aren't a fit for a 60 Hz loop that lasts minutes.
 - **Inputs tied to their sender.** With a game server, each player's input would arrive over their own authenticated connection, instead of claiming a seat on a shared channel.
-- **Server-side housekeeping.** `pg_cron` jobs would close abandoned rooms, delete old seats and finish matches whose host disappeared, instead of relying on a browser being open.
+- **Faster housekeeping.** The cleanup job's 2-hour cutoff is fine at this size.  With a server running matches, abandoned rooms could be closed the moment their host disappears instead.
 - **The lobby scales differently.** Every lobby client refetching on every room change is fine for dozens of rooms.  For thousands, you'd want:
   - lobby updates broadcast from a database trigger (`realtime.broadcast_changes`) carrying the changed row;
   - pagination and filters;
