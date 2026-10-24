@@ -53,7 +53,8 @@ export function sandboxScreen(actions: SandboxActions): View {
   let players = 4;
   let bots = true;
   let botSkill = 0.7;
-  let seed = 1;
+  // Random, so the first game doesn't always open the same way.
+  let seed = (Math.random() * 2 ** 32) >>> 0;
 
   let state = newGame();
   let prev = state;

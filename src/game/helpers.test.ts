@@ -57,6 +57,13 @@ describe('botInput', () => {
     expect(botInput(near, 0, config, 0.2)).toBe(0);
   });
 
+  it('reads a ball still heading inward only at high skill', () => {
+    // Just off gate 2's paddle, bound across the middle for gate 0, a bit counterclockwise.
+    const across = inPlay(-0.85, 0, 1, 0.15);
+    expect(botInput(across, 0, config, 0.9)).toBe(1);
+    expect(botInput(across, 0, config, 0.6)).toBe(0);
+  });
+
   it('does nothing for an inactive gate', () => {
     expect(botInput(setGateActive(inPlay(0.5, 0, 0.5, 0.2), 0, false), 0, config, 1)).toBe(0);
   });
@@ -73,6 +80,26 @@ describe('botInput', () => {
       goals += result.events.filter((e) => e.type === 'goal').length;
     }
     expect(hits).toBeGreaterThan(goals * 3);
+  });
+
+  it("doesn't trade the ball straight across with the bot opposite", () => {
+    // A ball launched at gate 1 used to go 1, 3, 1, 3... for dozens of hits.
+    let state = createGame(4, 1103527590, config);
+    let streak = 0;
+    let worst = 0;
+    let last = -1;
+    for (let t = 0; t < 60 * 60; t++) {
+      const result = step(state, state.gates.map((_, i) => botInput(state, i, config, 0.6)), config);
+      state = result.state;
+      for (const e of result.events) {
+        if (e.type === 'goal') last = -1;
+        if (e.type !== 'hit') continue;
+        streak = last >= 0 && (e.gate + 2) % 4 === last ? streak + 1 : 0;
+        worst = Math.max(worst, streak);
+        last = e.gate;
+      }
+    }
+    expect(worst).toBeLessThan(10);
   });
 });
 
