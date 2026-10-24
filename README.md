@@ -247,4 +247,5 @@ scripts/check.sh       what `npm run check` and the pre-commit hook run
 Makefile               shortcuts for the stack, builds, tests and deploys (`make` lists them)
 ```
 
+
 [`CLAUDE.md`](CLAUDE.md) holds the full spec and conventions.
