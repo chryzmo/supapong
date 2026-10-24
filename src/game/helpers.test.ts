@@ -35,7 +35,7 @@ describe('botInput', () => {
   const inPlay = (x: number, y: number, vx: number, vy: number): GameState => ({
     ...createGame(4, 1, config),
     respawnTicks: 0,
-    ball: { x, y, vx, vy },
+    balls: [{ x, y, vx, vy, lastTouch: -1, rally: 0 }],
   });
 
   it('moves toward where the ball will cross its paddle', () => {
@@ -62,6 +62,14 @@ describe('botInput', () => {
     const across = inPlay(-0.85, 0, 1, 0.15);
     expect(botInput(across, 0, config, 0.9)).toBe(1);
     expect(botInput(across, 0, config, 0.6)).toBe(0);
+  });
+
+  it('goes for the ball it would meet soonest', () => {
+    // Both heading for gate 0: the nearer one counterclockwise of center, the farther one clockwise.
+    const near = { x: 0.7, y: 0.1, vx: 1, vy: 0.2, lastTouch: -1, rally: 0 };
+    const far = { x: 0.1, y: 0, vx: 1, vy: -0.4, lastTouch: -1, rally: 0 };
+    expect(botInput({ ...inPlay(0, 0, 0, 0), balls: [far, near] }, 0, config, 1)).toBe(1);
+    expect(botInput({ ...inPlay(0, 0, 0, 0), balls: [far] }, 0, config, 1)).toBe(-1);
   });
 
   it('does nothing for an inactive gate', () => {
@@ -104,27 +112,34 @@ describe('botInput', () => {
 });
 
 describe('interpolate', () => {
-  const a: GameState = { ...createGame(4, 1, config), respawnTicks: 0, ball: { x: 0, y: 0, vx: 1, vy: 0 } };
-  const b: GameState = { ...a, tick: 1, ball: { x: 0.1, y: 0.2, vx: 1, vy: 0 } };
+  const a: GameState = { ...createGame(4, 1, config), respawnTicks: 0, balls: [{ x: 0, y: 0, vx: 1, vy: 0, lastTouch: -1, rally: 0 }] };
+  const b: GameState = { ...a, tick: 1, balls: [{ x: 0.1, y: 0.2, vx: 1, vy: 0, lastTouch: -1, rally: 0 }] };
 
   it('blends the ball position', () => {
     const mid = interpolate(a, b, 0.5);
-    expect(mid.ball.x).toBeCloseTo(0.05);
-    expect(mid.ball.y).toBeCloseTo(0.1);
+    expect(mid.balls[0]!.x).toBeCloseTo(0.05);
+    expect(mid.balls[0]!.y).toBeCloseTo(0.1);
     expect(mid.tick).toBe(1);
   });
 
   it('clamps alpha', () => {
-    expect(interpolate(a, b, 2).ball).toEqual(b.ball);
-    expect(interpolate(a, b, -1).ball.x).toBeCloseTo(0);
+    expect(interpolate(a, b, 2).balls[0]!).toEqual(b.balls[0]!);
+    expect(interpolate(a, b, -1).balls[0]!.x).toBeCloseTo(0);
+  });
+
+  it("doesn't blend balls when their number changes: they stay put until the later state", () => {
+    const second = { x: 0.5, y: 0.5, vx: 0, vy: 1, lastTouch: 1, rally: 2 };
+    const split: GameState = { ...b, balls: [...b.balls, second] };
+    expect(interpolate(a, split, 0.5).balls).toEqual(a.balls);
+    expect(interpolate(a, split, 1).balls).toEqual(split.balls);
   });
 
   it("doesn't blend the ball across a goal: it stays put until the goal tick", () => {
-    const scored: GameState = { ...b, respawnTicks: 30, ball: { x: 0, y: 0, vx: 0, vy: 0 } };
-    const before = { ...a, ball: { x: 0.9, y: 0, vx: 1, vy: 0 } };
-    expect(interpolate(before, scored, 0.5).ball).toEqual(before.ball);
+    const scored: GameState = { ...b, respawnTicks: 30, balls: [{ x: 0, y: 0, vx: 0, vy: 0, lastTouch: -1, rally: 0 }] };
+    const before = { ...a, balls: [{ x: 0.9, y: 0, vx: 1, vy: 0, lastTouch: -1, rally: 0 }] };
+    expect(interpolate(before, scored, 0.5).balls[0]!).toEqual(before.balls[0]!);
     expect(interpolate(before, scored, 0.5).respawnTicks).toBe(0);
-    expect(interpolate(before, scored, 1).ball).toEqual(scored.ball);
+    expect(interpolate(before, scored, 1).balls[0]!).toEqual(scored.balls[0]!);
   });
 
   it('blends paddles the short way across ±π', () => {

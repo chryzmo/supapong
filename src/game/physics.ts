@@ -71,6 +71,14 @@ export interface Ball {
   vy: number;
 }
 
+/** A ball in play, with what it remembers since its launch. */
+export interface BallState extends Ball {
+  /** The gate whose paddle touched this ball last since it launched, or -1. */
+  lastTouch: number;
+  /** Consecutive paddle hits on this ball since its launch. */
+  rally: number;
+}
+
 export interface GateState {
   /** False once the gate's player leaves: the gate becomes wall and has no paddle. */
   active: boolean;
@@ -80,28 +88,29 @@ export interface GateState {
 
 export interface GameState {
   tick: number;
-  ball: Ball;
+  /**
+   * The balls in play, never empty.  While waiting to launch it's one ball
+   * resting at the center.
+   */
+  balls: BallState[];
   gates: GateState[];
   /** Points per gate. */
   scores: number[];
   /** Goals scored so far, including goals that earned nobody a point. */
   goals: number;
-  /** The gate whose paddle touched the ball last since it launched, or -1. */
-  lastTouch: number;
   /** Ticks until the ball launches.  While > 0 the ball sits at the center. */
   respawnTicks: number;
-  /** Consecutive paddle hits since the last launch. */
-  rally: number;
   /** PRNG state. */
   seed: number;
 }
 
 export type PhysicsEvent =
   | { type: 'launch' }
-  | { type: 'hit'; gate: number }
+  /** `ball` is the index of the ball in the state before the step. */
+  | { type: 'hit'; gate: number; ball: number }
   | { type: 'wall' }
   /** `scorer` is the gate that got the point, or -1 if nobody did. */
-  | { type: 'goal'; gate: number; scorer: number };
+  | { type: 'goal'; gate: number; scorer: number; ball: number };
 
 export interface StepResult {
   state: GameState;
@@ -176,16 +185,19 @@ export function nextRandom(seed: number): [number, number] {
 
 // State --------------------------------------------------------------------------
 
+/** A ball at the center, waiting to launch. */
+export function restingBall(): BallState {
+  return { x: 0, y: 0, vx: 0, vy: 0, lastTouch: -1, rally: 0 };
+}
+
 export function createGame(gateCount: number, seed: number, config: PhysicsConfig = DEFAULT_CONFIG): GameState {
   return {
     tick: 0,
-    ball: { x: 0, y: 0, vx: 0, vy: 0 },
+    balls: [restingBall()],
     gates: Array.from({ length: gateCount }, (_, i) => ({ active: true, paddle: gateCenter(i, gateCount) })),
     scores: Array.from({ length: gateCount }, () => 0),
     goals: 0,
-    lastTouch: -1,
     respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
-    rally: 0,
     seed: seed >>> 0,
   };
 }
@@ -237,24 +249,46 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
     if (next.respawnTicks === 0) {
       const [angle, seed] = launchAngle(gates, state.seed, config);
       next.seed = seed;
-      next.rally = 0;
-      next.lastTouch = -1;
-      next.ball = { x: 0, y: 0, vx: Math.cos(angle) * config.launchSpeed, vy: Math.sin(angle) * config.launchSpeed };
+      next.balls = [{ ...restingBall(), vx: Math.cos(angle) * config.launchSpeed, vy: Math.sin(angle) * config.launchSpeed }];
       events.push({ type: 'launch' });
     }
     return { state: next, events };
   }
 
-  next = moveBall(next, config, events);
+  // Balls move one after another, in order, so the PRNG (wall bounces) is
+  // used in the same order every time.
+  const balls: BallState[] = [];
+  let scores = next.scores;
+  let goals = next.goals;
+  let seed = next.seed;
+  for (const [index, ball] of state.balls.entries()) {
+    const moved = moveBall(ball, index, gates, seed, config, events);
+    seed = moved.seed;
+    if (moved.goal) {
+      const { scorer } = moved.goal;
+      scores = scores.map((s, i) => (i === scorer ? s + 1 : s));
+      goals++;
+    } else {
+      balls.push(moved.ball);
+    }
+  }
+  next = { ...next, balls, scores, goals, seed };
+  // The last ball gone: wait, then launch a new one.
+  if (balls.length === 0) next = { ...next, balls: [restingBall()], respawnTicks: Math.round(config.respawnDelay * TICK_RATE) };
   return { state: next, events };
 }
 
-function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[]): GameState {
-  let { x, y, vx, vy } = state.ball;
-  let rally = state.rally;
-  let seed = state.seed;
-  let lastTouch = state.lastTouch;
-  const n = state.gates.length;
+interface Moved {
+  ball: BallState;
+  seed: number;
+  /** Set when the ball went into a gate; `ball` is then where it went in. */
+  goal?: { gate: number; scorer: number };
+}
+
+function moveBall(ball: BallState, index: number, gates: GateState[], startSeed: number, config: PhysicsConfig, events: PhysicsEvent[]): Moved {
+  let { x, y, vx, vy, rally, lastTouch } = ball;
+  let seed = startSeed;
+  const n = gates.length;
   const hitR = config.paddleRadius - config.ballRadius;
   const rimR = 1 - config.ballRadius;
   const paddleHalf = paddleHalfWidth(n, config);
@@ -271,11 +305,9 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
       const px = x + vx * tPaddle;
       const py = y + vy * tPaddle;
       const angle = Math.atan2(py, px);
-      const gate = state.gates.findIndex(
-        (g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= reach,
-      );
+      const gate = gates.findIndex((g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= reach);
       if (gate !== -1) {
-        const offset = Math.max(-1, Math.min(1, angleDiff(angle, state.gates[gate]!.paddle) / paddleHalf));
+        const offset = Math.max(-1, Math.min(1, angleDiff(angle, gates[gate]!.paddle) / paddleHalf));
         [vx, vy] = paddleBounce(px, py, vx, vy, offset, config);
         // Start just inside the paddle so the next pass doesn't see the same crossing.
         const len = Math.hypot(px, py);
@@ -284,7 +316,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
         remaining -= tPaddle;
         rally++;
         lastTouch = gate;
-        events.push({ type: 'hit', gate });
+        events.push({ type: 'hit', gate, ball: index });
         continue;
       }
       // Missed the paddle: keep going toward the rim this pass.
@@ -294,20 +326,11 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
       const px = x + vx * tRim;
       const py = y + vy * tRim;
       const angle = Math.atan2(py, px);
-      const goal = gateAt(angle, state.gates, config);
+      const goal = gateAt(angle, gates, config);
       if (goal !== -1) {
-        const scorer = goalScorer(goal, lastTouch, state.gates);
-        events.push({ type: 'goal', gate: goal, scorer });
-        return {
-          ...state,
-          ball: { x: 0, y: 0, vx: 0, vy: 0 },
-          scores: state.scores.map((s, i) => (i === scorer ? s + 1 : s)),
-          goals: state.goals + 1,
-          lastTouch: -1,
-          respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
-          rally: 0,
-          seed,
-        };
+        const scorer = goalScorer(goal, lastTouch, gates);
+        events.push({ type: 'goal', gate: goal, scorer, ball: index });
+        return { ball: { x: px, y: py, vx, vy, rally, lastTouch }, seed, goal: { gate: goal, scorer } };
       }
       // Wall: mirror the velocity about the rim normal, then turn it by a
       // small random angle.
@@ -331,7 +354,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
     remaining = 0;
   }
 
-  return { ...state, ball: { x, y, vx, vy }, rally, seed, lastTouch };
+  return { ball: { x, y, vx, vy, rally, lastTouch }, seed };
 }
 
 /**

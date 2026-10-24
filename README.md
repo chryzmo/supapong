@@ -122,8 +122,8 @@ The design is host-authoritative.  Guests replay the host's physics between snap
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input:{player_id}` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
-| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, seed, respawn, rally }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
-| `event` | host → all | rare | `start` (gate order, bots marked, goal limit), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
+| `state` | host → guests | 20 Hz | `{ tick, balls: [x, y, vx, vy, touch, rally][], paddles[], active[], scores[], goals, seed, respawn }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
+| `event` | host → all | rare | `start` (gate order, bots marked, goal limit, protocol version), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.
 

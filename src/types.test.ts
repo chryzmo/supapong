@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DISPLAY_NAME_MAX,
+  MAX_BALLS,
   ROOM_NAME_MAX,
   parseInputMessage,
   parseRoomEvent,
@@ -78,21 +79,26 @@ describe('parseRoomEvent', () => {
   });
 
   it('accepts start, closed and removed', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15 });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 2 });
+  });
+
+  it('treats a start without a protocol (a host on older code) as protocol 1', () => {
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, protocol: 1 });
   });
 
   it('keeps the bot flag on bot gates', () => {
     const withBot = [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1', bot: true }];
-    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10 });
-    expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10 })).toEqual({
+    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, protocol: 2 });
+    expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10, protocol: 2 })).toEqual({
       type: 'start',
       gates: [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1' }],
       goalLimit: 10,
+      protocol: 2,
     });
   });
 
   it('plays to 10 when a start has no goal limit (a host on the previous version)', () => {
-    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10 });
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, protocol: 1 });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
     expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
   });
@@ -101,6 +107,8 @@ describe('parseRoomEvent', () => {
     ['an unknown type', { type: 'explode' }],
     ['a start with one gate', { type: 'start', gates: gates.slice(0, 1) }],
     ['a start with no goals to play', { type: 'start', gates, goalLimit: 0 }],
+    ['a start with protocol 0', { type: 'start', gates, goalLimit: 10, protocol: 0 }],
+    ['a start with a fractional protocol', { type: 'start', gates, goalLimit: 10, protocol: 1.5 }],
     ['a start with too many goals', { type: 'start', gates, goalLimit: 51 }],
     ['a start with a fractional goal limit', { type: 'start', gates, goalLimit: 2.5 }],
     ['a start with nine gates', { type: 'start', gates: Array.from({ length: 9 }, (_, i) => ({ seat: i % 8, playerId: `p${i}`, displayName: 'P' })) }],
@@ -126,6 +134,7 @@ describe('parseInputMessage', () => {
       paddle: 2.1,
       save: { tick: 63.4, paddle: 2.09 },
     });
+    expect(parseInputMessage({ seat: 2, dir: 0, save: { tick: 63.4, paddle: 2.09, ball: 2 } })?.save).toEqual({ tick: 63.4, paddle: 2.09, ball: 2 });
   });
 
   it.each([
@@ -137,6 +146,8 @@ describe('parseInputMessage', () => {
     ['a save that isn\'t an object', { seat: 0, dir: 0, save: 63 }],
     ['a save at a negative tick', { seat: 0, dir: 0, save: { tick: -1, paddle: 0 } }],
     ['a save without a paddle', { seat: 0, dir: 0, save: { tick: 63 } }],
+    ['a save naming a fractional ball', { seat: 0, dir: 0, save: { tick: 63, paddle: 0, ball: 0.5 } }],
+    ['a save naming a ball past the last', { seat: 0, dir: 0, save: { tick: 63, paddle: 0, ball: MAX_BALLS } }],
     ['nothing', null],
   ])('rejects %s', (_label, value) => {
     expect(parseInputMessage(value)).toBeNull();
@@ -146,26 +157,37 @@ describe('parseInputMessage', () => {
 describe('parseStateMessage', () => {
   const state = {
     tick: 30,
-    ball: [0.1, -0.2, 0.5, 0.3],
+    balls: [[0.1, -0.2, 0.5, 0.3, 1, 4]],
     paddles: [0, 2.09, -2.09],
     active: [true, true, false],
     scores: [1, 0, 2],
     goals: 3,
-    touch: 1,
     respawn: 0,
-    rally: 4,
   };
+  /** The same snapshot from a host on protocol 1: one ball, its touch and rally alongside. */
+  const { balls: _, ...rest } = state;
+  const single = { ...rest, ball: [0.1, -0.2, 0.5, 0.3], touch: 1, rally: 4 };
 
   it('accepts a valid snapshot', () => {
     expect(parseStateMessage(state)).toEqual(state);
-    expect(parseStateMessage({ ...state, touch: -1 })).toEqual({ ...state, touch: -1 });
+    const untouched = { ...state, balls: [[0.1, -0.2, 0.5, 0.3, -1, 0]] };
+    expect(parseStateMessage(untouched)).toEqual(untouched);
   });
 
-  it('treats a missing touch (a host on the previous version) as nobody', () => {
-    expect(parseStateMessage({ ...state, touch: undefined })).toEqual({ ...state, touch: -1 });
+  it('accepts several balls', () => {
+    const three = { ...state, balls: [state.balls[0], [0, 0, 1, 0, 2, 0], [0.5, 0.5, 0, -1, -1, 0]] };
+    expect(parseStateMessage(three)).toEqual(three);
   });
 
-  it('treats missing goals (a host on the previous version) as none yet', () => {
+  it('reads the single ball a host on protocol 1 sends', () => {
+    expect(parseStateMessage(single)).toEqual(state);
+  });
+
+  it('treats a missing touch (a host from before last-touch scoring) as nobody', () => {
+    expect(parseStateMessage({ ...single, touch: undefined })?.balls).toEqual([[0.1, -0.2, 0.5, 0.3, -1, 4]]);
+  });
+
+  it('treats missing goals (a host from before goal limits) as none yet', () => {
     expect(parseStateMessage({ ...state, goals: undefined })).toEqual({ ...state, goals: 0 });
   });
 
@@ -174,8 +196,16 @@ describe('parseStateMessage', () => {
   });
 
   it.each([
-    ['a short ball', { ...state, ball: [0, 0, 0] }],
-    ['a NaN in the ball', { ...state, ball: [0, Number.NaN, 0, 0] }],
+    ['a short ball', { ...state, balls: [[0, 0, 0, 0, -1]] }],
+    ['a NaN in a ball', { ...state, balls: [[0, Number.NaN, 0, 0, -1, 0]] }],
+    ['no balls', { ...state, balls: [] }],
+    ['too many balls', { ...state, balls: Array(MAX_BALLS + 1).fill(state.balls[0]) }],
+    ['a touch past the last gate', { ...state, balls: [[0, 0, 0, 0, 3, 0]] }],
+    ['a touch below -1', { ...state, balls: [[0, 0, 0, 0, -2, 0]] }],
+    ['a fractional rally', { ...state, balls: [[0, 0, 0, 0, -1, 1.5]] }],
+    ['no ball of either shape', rest],
+    ['a short single ball', { ...single, ball: [0, 0, 0] }],
+    ['a single ball without its rally', { ...single, rally: undefined }],
     ['one gate', { ...state, paddles: [0], active: [true], scores: [0] }],
     ['mismatched lengths', { ...state, active: [true, true] }],
     ['non-boolean active', { ...state, active: [1, 1, 0] }],
@@ -184,8 +214,6 @@ describe('parseStateMessage', () => {
     ['a missing respawn', { ...state, respawn: undefined }],
     ['a fractional seed', { ...state, seed: 1.5 }],
     ['a seed past 32 bits', { ...state, seed: 2 ** 32 }],
-    ['a touch past the last gate', { ...state, touch: 3 }],
-    ['a touch below -1', { ...state, touch: -2 }],
   ])('rejects %s', (_label, value) => {
     expect(parseStateMessage(value)).toBeNull();
   });

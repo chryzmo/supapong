@@ -185,14 +185,14 @@ export class HostGame {
    * ball at host tick `tick`.  If it's recent, plausible, and a hit when
    * replayed, rewind and make it so.  Returns whether the save stood.
    */
-  claimSave(seat: number, tick: number, paddle: number): boolean {
+  claimSave(seat: number, tick: number, paddle: number, ball = 0): boolean {
     const gate = this.gates.findIndex((g) => g.seat === seat);
     if (this.over || gate === -1 || !this.claimable(gate)) return false;
     const index = this.history.findIndex((r) => r.before.tick === Math.floor(tick));
     if (index === -1) return false; // Too old, or not played yet.
     const replayed = this.history.slice(index);
     // Already a save here: nothing to do.
-    if (this.history.slice(Math.max(0, index - 1), index + 2).some((r) => hitBy(r.events, gate))) return false;
+    if (this.history.slice(Math.max(0, index - 1), index + 2).some((r) => hitBy(r.events, gate, ball))) return false;
     // A goal since then is already official (it wasn't against a guest), so it can't be undone.
     if (replayed.some((r) => r.events.some((e) => e.type === 'goal' && !this.claimable(e.gate)))) return false;
 
@@ -217,7 +217,7 @@ export class HostGame {
       rebuilt.push({ before, inputs, events: result.events });
       state = result.state;
     }
-    if (!rebuilt.slice(0, 2).some((r) => hitBy(r.events, gate))) return false;
+    if (!rebuilt.slice(0, 2).some((r) => hitBy(r.events, gate, ball))) return false;
 
     // The replay is the match now.  Goals in the old version are dropped
     // (they were all still pending), and any in the new one are judged anew.
@@ -327,6 +327,6 @@ export class HostGame {
   }
 }
 
-function hitBy(events: PhysicsEvent[], gate: number): boolean {
-  return events.some((e) => e.type === 'hit' && e.gate === gate);
+function hitBy(events: PhysicsEvent[], gate: number, ball: number): boolean {
+  return events.some((e) => e.type === 'hit' && e.gate === gate && e.ball === ball);
 }

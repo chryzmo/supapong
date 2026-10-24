@@ -12,7 +12,7 @@ import { DT, angleDiff, exitTime, paddleReach, wrapAngle, type Ball, type Physic
 export interface DrawnFrame {
   /** The host tick the frame shows, fractional. */
   tick: number;
-  ball: Ball;
+  balls: Ball[];
   respawnTicks: number;
   /** The guest's own paddle, as drawn. */
   paddle: number;
@@ -23,23 +23,41 @@ export interface SaveClaim {
   tick: number;
   /** Where the guest's paddle was then. */
   paddle: number;
+  /** Which ball, by its index in the frames. */
+  ball: number;
 }
 
 /**
- * A save to claim if, between frames `prev` and `next`, the ball reached the
+ * A save to claim if, between frames `prev` and `next`, a ball reached the
  * guest's paddle line with the guest's paddle covering that spot, while the
  * host's version (the ball the guest is drawing) didn't bounce off it.
+ * Balls are matched by index, so frames with different numbers of balls
+ * (one just went in) are compared only for the balls both have.
  */
 export function detectSave(prev: DrawnFrame, next: DrawnFrame, gateCount: number, config: PhysicsConfig): SaveClaim | null {
   if (next.tick <= prev.tick || prev.respawnTicks > 0) return null;
-  const { x, y, vx, vy } = prev.ball;
+  for (const [index, ball] of prev.balls.entries()) {
+    const claim = detectBallSave(prev, next, ball, next.balls[index], gateCount, config);
+    if (claim) return { ...claim, ball: index };
+  }
+  return null;
+}
+
+function detectBallSave(
+  prev: DrawnFrame,
+  next: DrawnFrame,
+  ball: Ball,
+  after: Ball | undefined,
+  gateCount: number,
+  config: PhysicsConfig,
+): Omit<SaveClaim, 'ball'> | null {
+  const { x, y, vx, vy } = ball;
   if (x * vx + y * vy <= 0) return null; // Heading in, not out.
   const t = exitTime(x, y, vx, vy, config.paddleRadius - config.ballRadius);
   const span = (next.tick - prev.tick) * DT;
   if (t > span) return null; // Doesn't reach the paddle line in this frame.
   // Heading back in already means the host had it bounce: nothing to claim.
-  const after = next.ball;
-  if (next.respawnTicks === 0 && after.x * after.vx + after.y * after.vy < 0) return null;
+  if (after && next.respawnTicks === 0 && after.x * after.vx + after.y * after.vy < 0) return null;
 
   const angle = Math.atan2(y + vy * t, x + vx * t);
   // The paddle partway through the frame, when the ball got there.

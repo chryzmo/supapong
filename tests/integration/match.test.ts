@@ -80,7 +80,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   hostSession.listen({
     input(m) {
       host.applyInput(m.seat, m.dir, m.paddle);
-      if (m.save) host.claimSave(m.seat, m.save.tick, m.save.paddle);
+      if (m.save) host.claimSave(m.seat, m.save.tick, m.save.paddle, m.save.ball);
     },
     playerGone: (id) => {
       goneIds.push(id);

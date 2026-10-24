@@ -1,5 +1,5 @@
 import { BOT_LEVELS } from '../game/bot';
-import { MIN_PLAYERS, type Gate, type MatchStart, type RosterEntry } from '../types';
+import { MIN_PLAYERS, PROTOCOL_VERSION, type Gate, type MatchStart, type RosterEntry } from '../types';
 import { errorMessage, h, type View } from '../ui';
 import { lineup, maxBots } from './lineup';
 import type { RoomSession } from './session';
@@ -121,7 +121,11 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
   session.listen({
     roster: renderRoster,
     event(event) {
-      if (event.type === 'start') actions.started({ gates: event.gates, goalLimit: event.goalLimit });
+      if (event.type === 'start' && event.protocol > PROTOCOL_VERSION) {
+        void exitRoom(session, actions, 'This match needs a newer version of the game.  Reload the page to join.');
+      } else if (event.type === 'start') {
+        actions.started({ gates: event.gates, goalLimit: event.goalLimit, protocol: event.protocol });
+      }
       if (event.type === 'closed') actions.left('The host closed the room.');
     },
     hostGone: () => void exitRoom(session, actions, 'The host disconnected, so the room closed.'),

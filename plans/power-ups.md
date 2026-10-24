@@ -26,10 +26,14 @@ Things that happen mid-match and change how a rally plays.  They should add choi
 
 ## Pickups
 
-- **Spawning:** with power-ups on, a token appears every 8–12 s (seeded) while the ball is in play.  At most one token is on the board at a time.  It sits at a seeded random spot between radius 0.25 and 0.65, away from the center where the ball launches and clear of the paddles.  The kind is also rolled: Wide paddle 40%, Shield 35%, Multiball 25%, to be tuned in the sandbox.
+- **Spawning:** with power-ups on, a token appears on whichever of these comes first:
+  - **a volley:** a ball's 6th consecutive hit, and every 6th after that (12, 18, …), counted per ball (`rally`);
+  - **the timer:** 8–12 s (seeded) of play with no token on the board.  It only counts down while a ball is in play and the board is empty, so the gap is measured from when the last token was collected or faded.
+
+  At most one token is on the board at a time.  A volley that lands while a token is already out doesn't queue a second one.  Any spawn, by either trigger, rolls a fresh 8–12 s for the timer, so a timed token can't follow a volley token straight away.  The token sits at a seeded random spot between radius 0.25 and 0.65, away from the center where the ball launches and clear of the paddles.  The kind is also rolled: Wide paddle 40%, Shield 35%, Multiball 25%, to be tuned in the sandbox.
 - **Collecting:** a ball that passes within its radius plus the token's (0.06) collects it for that ball's last toucher.  A ball nobody has touched yet doesn't collect it: the token stays.  So you earn a pickup by aiming at it.
 - **Fading:** an uncollected token fades after 10 s.
-- **State:** `pickup: { kind, x, y, ticksLeft } | null`, plus the countdown to the next spawn.
+- **State:** `pickup: { kind, x, y, ticksLeft } | null`, plus the timer's countdown to the next spawn.  The volley trigger needs nothing extra: it reads each ball's `rally` as the hit happens.
 
 ## The first three
 
@@ -59,6 +63,8 @@ Things that happen mid-match and change how a rally plays.  They should add choi
 
 ### Phase 1: one ball becomes many (no behavior change)
 
+Done.  `GameState.balls`, per-ball `lastTouch` and `rally`, a `ball` index on `hit` and `goal` events and on save claims, snapshots with `balls` (still reading protocol 1's single `ball`), and `PROTOCOL_VERSION = 2` in `start`.
+
 This is a refactor with no new behavior: every existing test should pass unchanged, apart from how a test builds its state.
 
 - **`GameState`:** `ball`, `lastTouch` and `rally` become `balls: { x, y, vx, vy, lastTouch, rally }[]`.  `respawnTicks` stays global: it means "no balls; launching soon".
@@ -82,9 +88,10 @@ About a day.
   - a wide paddle in its normal color, with a brighter edge while the effect lasts;
   - the shield as an arc in the owner's color across the gate;
   - each extra ball tinted by its last toucher, like the main one.
-- **Sandbox:** a "Power-ups" checkbox, on by default, plus sliders for the spawn interval and durations, which "Copy config" includes.
+- **Sandbox:** a "Power-ups" checkbox, on by default, plus sliders for the spawn interval, the volley length (6) and the durations, which "Copy config" includes.
 - **Tests:**
   - pickups spawn the same way from the same seed;
+  - a 6th hit spawns a token, a 6th hit with one already out doesn't, and either kind of spawn restarts the timer;
   - only a touched ball collects;
   - a wide paddle saves a ball a normal one would miss;
   - a shield stops one goal, then breaks;

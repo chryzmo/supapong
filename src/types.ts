@@ -5,6 +5,14 @@ export const DISPLAY_NAME_MAX = 24;
 export const ROOM_NAME_MAX = 32;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
+/**
+ * The version of the match messages this code speaks.  2: snapshots carry
+ * `balls`.  The host puts it in `start`, so a guest on older code can tell
+ * it needs to reload (from version 2 on).
+ */
+export const PROTOCOL_VERSION = 2;
+/** Most balls a snapshot may carry. */
+export const MAX_BALLS = 8;
 /** Goals in total that end a match.  The database accepts 1 to 50; the lobby offers these. */
 export const GOAL_LIMIT_CHOICES = [5, 10, 15, 20, 25] as const;
 export const DEFAULT_GOAL_LIMIT = 10;
@@ -111,6 +119,8 @@ export interface MatchStart {
   gates: Gate[];
   /** Goals in total that end the match, from the room. */
   goalLimit: number;
+  /** The host's PROTOCOL_VERSION.  1 when a host on older code leaves it out. */
+  protocol: number;
   /** Host only, never sent: how well the bots play, 0 to 1 (see botInput). */
   botSkill?: number;
 }
@@ -134,30 +144,37 @@ export interface InputMessage {
   seat: number;
   dir: Dir;
   paddle?: number;
-  /** A save the player saw on their screen and the host may have missed (see saves.ts). */
-  save?: { tick: number; paddle: number };
+  /**
+   * A save the player saw on their screen and the host may have missed (see
+   * saves.ts).  `ball` is its index in the snapshot; a guest on protocol 1
+   * leaves it out, meaning 0.
+   */
+  save?: { tick: number; paddle: number; ball?: number };
 }
 
 /**
  * Broadcast `state` (host -> all, ~20 Hz).  Arrays are per gate, in gate
  * order.  Numbers are rounded before sending to keep the payload small.
  */
+/**
+ * One ball: x, y, vx, vy, then the gate that touched it last (and would
+ * score; it tints the ball), or -1, and its rally (hits since launch).
+ */
+export type BallTuple = [number, number, number, number, number, number];
+
 export interface StateMessage {
   tick: number;
-  /** x, y, vx, vy */
-  ball: [number, number, number, number];
+  /** Never empty: while waiting to launch, one ball resting at the center. */
+  balls: BallTuple[];
   paddles: number[];
   active: boolean[];
   scores: number[];
   /** Goals scored so far; the match ends at the room's goal limit. */
   goals: number;
-  /** The gate that touched the ball last (and would score), or -1.  Tints the ball. */
-  touch: number;
   /** The host's PRNG state, so clients can replay the physics between snapshots. */
   seed?: number;
   /** Ticks until the ball launches; 0 while it's in play. */
   respawn: number;
-  rally: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -217,7 +234,9 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       // A host still running the previous version sends no limit, and plays to 10.
       const goalLimit = value.goalLimit ?? DEFAULT_GOAL_LIMIT;
       if (!isCount(goalLimit) || goalLimit < 1 || goalLimit > GOAL_LIMIT_MAX) return null;
-      return { type: 'start', gates, goalLimit };
+      const protocol = value.protocol ?? 1;
+      if (!isCount(protocol) || protocol < 1) return null;
+      return { type: 'start', gates, goalLimit, protocol };
     }
     case 'closed':
       return { type: 'closed' };
@@ -248,37 +267,56 @@ export function parseInputMessage(value: unknown): InputMessage | null {
   const input: InputMessage = paddle === undefined ? { seat, dir } : { seat, dir, paddle };
   if (value.save === undefined) return input;
   if (!isRecord(value.save)) return null;
-  const { tick, paddle: savedAt } = value.save;
+  const { tick, paddle: savedAt, ball } = value.save;
   if (!isFiniteNumber(tick) || tick < 0 || !isFiniteNumber(savedAt)) return null;
-  return { ...input, save: { tick, paddle: savedAt } };
+  if (ball !== undefined && !(isCount(ball) && ball < MAX_BALLS)) return null;
+  return { ...input, save: { tick, paddle: savedAt, ...(ball !== undefined ? { ball } : {}) } };
 }
 
 export function parseStateMessage(value: unknown): StateMessage | null {
   if (!isRecord(value)) return null;
-  const { tick, ball, paddles, active, scores, respawn, rally, seed } = value;
-  // A host still on the previous version sends no goals, touch or seed.
+  const { tick, paddles, active, scores, respawn, seed } = value;
+  // A host still on the previous version sends no goals or seed.
   const goals = value.goals ?? 0;
-  const touch = value.touch ?? -1;
   if (seed !== undefined && !(isCount(seed) && seed <= 0xffffffff)) return null;
-  if (!isCount(tick) || !isCount(goals) || !isCount(respawn) || !isCount(rally)) return null;
-  if (!isNumberArray(ball, 4)) return null;
+  if (!isCount(tick) || !isCount(goals) || !isCount(respawn)) return null;
   if (!isNumberArray(paddles) || paddles.length < MIN_PLAYERS || paddles.length > MAX_PLAYERS) return null;
   const n = paddles.length;
   if (!Array.isArray(active) || active.length !== n || !active.every((a) => typeof a === 'boolean')) return null;
   if (!Array.isArray(scores) || scores.length !== n || !scores.every(isCount)) return null;
-  if (touch !== -1 && !(isCount(touch) && touch < n)) return null;
-  const [x, y, vx, vy] = ball;
-  if (x === undefined || y === undefined || vx === undefined || vy === undefined) return null;
+  const balls = parseBalls(value, n);
+  if (!balls) return null;
   return {
     tick,
-    ball: [x, y, vx, vy],
+    balls,
     paddles,
     active: active.filter((a): a is boolean => typeof a === 'boolean'),
     scores: scores.filter(isCount),
     goals,
-    touch,
     ...(seed !== undefined ? { seed } : {}),
     respawn,
-    rally,
   };
+}
+
+/**
+ * `balls`, or a host on protocol 1's single `ball` with its `touch` and
+ * `rally` alongside.
+ */
+function parseBalls(value: Record<string, unknown>, gateCount: number): BallTuple[] | null {
+  const raw: unknown[] | null = Array.isArray(value.balls)
+    ? value.balls
+    : isNumberArray(value.ball, 4)
+      ? [[...value.ball, value.touch ?? -1, value.rally]]
+      : null;
+  if (!raw || raw.length === 0 || raw.length > MAX_BALLS) return null;
+  const balls: BallTuple[] = [];
+  for (const ball of raw) {
+    if (!isNumberArray(ball, 6)) return null;
+    const [x, y, vx, vy, touch, rally] = ball;
+    if (x === undefined || y === undefined || vx === undefined || vy === undefined || touch === undefined || rally === undefined) return null;
+    if (touch !== -1 && !(isCount(touch) && touch < gateCount)) return null;
+    if (!isCount(rally)) return null;
+    balls.push([x, y, vx, vy, touch, rally]);
+  }
+  return balls;
 }

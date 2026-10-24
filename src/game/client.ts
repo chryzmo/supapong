@@ -70,7 +70,7 @@ export class ClientGame {
     this.buffer.push(decodeState(message), this.now(), message.seed !== undefined);
     // The host took our save: from this snapshot on, its version has it.
     const claim = this.claim;
-    if (claim && claim.until === undefined && message.tick > claim.tick && message.touch === this.myGate) claim.until = message.tick;
+    if (claim && claim.until === undefined && message.tick > claim.tick && message.balls[claim.ball]?.[4] === this.myGate) claim.until = message.tick;
   }
 
   hasState(): boolean {
@@ -128,7 +128,7 @@ export class ClientGame {
   /** Claims a save if, since the last frame, our screen showed one the host's ball doesn't. */
   private checkForSave(state: GameState, tick: number | undefined): void {
     if (tick === undefined) return;
-    const frame: DrawnFrame = { tick, ball: state.ball, respawnTicks: state.respawnTicks, paddle: this.ownPaddle };
+    const frame: DrawnFrame = { tick, balls: state.balls, respawnTicks: state.respawnTicks, paddle: this.ownPaddle };
     const claim = this.lastFrame && detectSave(this.lastFrame, frame, this.gates.length, this.config);
     this.lastFrame = frame;
     if (!claim || claim.tick - this.lastClaimTick < CLAIM_GAP_TICKS) return;

@@ -16,8 +16,8 @@ function outward(r: number, angle = gate): Ball {
 /** Two frames one tick apart, with the ball crossing the paddle line halfway between. */
 function frames(paddle: number, after: Partial<DrawnFrame> = {}): [DrawnFrame, DrawnFrame] {
   const r = hitR - (speed * DT) / 2;
-  const prev = { tick: 100, ball: outward(r), respawnTicks: 0, paddle };
-  const next = { tick: 101, ball: outward(r + speed * DT), respawnTicks: 0, paddle, ...after };
+  const prev = { tick: 100, balls: [outward(r)], respawnTicks: 0, paddle };
+  const next = { tick: 101, balls: [outward(r + speed * DT)], respawnTicks: 0, paddle, ...after };
   return [prev, next];
 }
 
@@ -35,7 +35,15 @@ describe('detectSave', () => {
   });
 
   it('claims through a goal: the host reset the ball, so it missed', () => {
-    expect(detectSave(...frames(gate, { respawnTicks: 70, ball: { x: 0, y: 0, vx: 0, vy: 0 } }), n, config)).not.toBeNull();
+    expect(detectSave(...frames(gate, { respawnTicks: 70, balls: [{ x: 0, y: 0, vx: 0, vy: 0 }] }), n, config)).not.toBeNull();
+  });
+
+  it('claims for whichever ball it was, by index', () => {
+    const [prev, next] = frames(gate);
+    const elsewhere = outward(0.3);
+    const claim = detectSave({ ...prev, balls: [elsewhere, prev.balls[0]!] }, { ...next, balls: [elsewhere, next.balls[0]!] }, n, config);
+    expect(claim?.ball).toBe(1);
+    expect(claim?.tick).toBeCloseTo(100.5, 6);
   });
 
   it("doesn't claim when the paddle doesn't cover the spot", () => {
@@ -45,17 +53,17 @@ describe('detectSave', () => {
 
   it("doesn't claim when the host had it bounce", () => {
     const back = outward(hitR - 0.01);
-    expect(detectSave(...frames(gate, { ball: { ...back, vx: -back.vx, vy: -back.vy } }), n, config)).toBeNull();
+    expect(detectSave(...frames(gate, { balls: [{ ...back, vx: -back.vx, vy: -back.vy }] }), n, config)).toBeNull();
   });
 
   it("doesn't claim when the ball doesn't reach the paddle line in the frame", () => {
     const [prev, next] = frames(gate);
-    expect(detectSave({ ...prev, ball: outward(0.5) }, next, n, config)).toBeNull();
+    expect(detectSave({ ...prev, balls: [outward(0.5)] }, next, n, config)).toBeNull();
   });
 
   it("doesn't claim for a ball heading in, waiting at the center, or no time passing", () => {
     const [prev, next] = frames(gate);
-    expect(detectSave({ ...prev, ball: { ...prev.ball, vx: -prev.ball.vx, vy: -prev.ball.vy } }, next, n, config)).toBeNull();
+    expect(detectSave({ ...prev, balls: [{ ...prev.balls[0]!, vx: -prev.balls[0]!.vx, vy: -prev.balls[0]!.vy }] }, next, n, config)).toBeNull();
     expect(detectSave({ ...prev, respawnTicks: 10 }, next, n, config)).toBeNull();
     expect(detectSave(prev, { ...next, tick: prev.tick }, n, config)).toBeNull();
   });

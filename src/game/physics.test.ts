@@ -27,7 +27,12 @@ const config: PhysicsConfig = { ...DEFAULT_CONFIG };
 
 /** A game with the ball already in play at (x, y) moving at (vx, vy). */
 function inPlay(gateCount: number, x: number, y: number, vx: number, vy: number): GameState {
-  return { ...createGame(gateCount, 1, config), respawnTicks: 0, ball: { x, y, vx, vy } };
+  return { ...createGame(gateCount, 1, config), respawnTicks: 0, balls: [{ x, y, vx, vy, lastTouch: -1, rally: 0 }] };
+}
+
+/** `state` with its first ball last touched by `gate`. */
+function touchedBy(state: GameState, gate: number): GameState {
+  return { ...state, balls: state.balls.map((b, i) => (i === 0 ? { ...b, lastTouch: gate } : b)) };
 }
 
 /** Runs ticks until `until` returns true or `max` ticks pass, collecting events. */
@@ -117,10 +122,10 @@ describe('launch', () => {
       expect(result.events).toEqual([]);
       state = result.state;
     }
-    expect(ballSpeed(state.ball)).toBe(0);
+    expect(ballSpeed(state.balls[0]!)).toBe(0);
     const result = step(state, [], config);
     expect(result.events).toEqual([{ type: 'launch' }]);
-    expect(ballSpeed(result.state.ball)).toBeCloseTo(config.launchSpeed);
+    expect(ballSpeed(result.state.balls[0]!)).toBeCloseTo(config.launchSpeed);
   });
 
   it('aims every launch inside an active gate, never at a wall or an empty gate', () => {
@@ -167,20 +172,20 @@ describe('launch', () => {
         // Run until a paddle hits the ball or the ball reaches the paddle radius.
         let ticks = 0;
         let hit = false;
-        while (!hit && Math.hypot(state.ball.x, state.ball.y) < hitR && ticks < 600) {
+        while (!hit && Math.hypot(state.balls[0]!.x, state.balls[0]!.y) < hitR && ticks < 600) {
           const result = step(state, [], config);
           state = result.state;
           hit = result.events.some((e) => e.type === 'hit');
           ticks++;
         }
         expect(ticks).toBeLessThanOrEqual(expectedTicks + 2);
-        if (!hit) expect(gateAt(Math.atan2(state.ball.y, state.ball.x), state.gates, config)).not.toBe(-1);
+        if (!hit) expect(gateAt(Math.atan2(state.balls[0]!.y, state.balls[0]!.x), state.gates, config)).not.toBe(-1);
       }
     }
   });
 
   it('launches in a direction that depends only on the seed', () => {
-    const launch = (seed: number) => run(createGame(3, seed, config), [], 200, (e) => e.type === 'launch').state.ball;
+    const launch = (seed: number) => run(createGame(3, seed, config), [], 200, (e) => e.type === 'launch').state.balls[0]!;
     expect(launch(1)).toEqual(launch(1));
     expect(launch(1)).not.toEqual(launch(2));
   });
@@ -216,17 +221,17 @@ describe('paddles', () => {
 describe('paddle hits', () => {
   it('send a dead-center hit straight back, a little faster', () => {
     const { state, events } = run(radialShot(4, 0), [], 300, (e) => e.type === 'hit');
-    expect(events).toContainEqual({ type: 'hit', gate: 0 });
-    expect(state.ball.vx).toBeLessThan(0);
-    expect(state.ball.vy).toBeCloseTo(0);
-    expect(ballSpeed(state.ball)).toBeCloseTo(config.launchSpeed * config.speedUpPerHit);
-    expect(state.rally).toBe(1);
+    expect(events).toContainEqual({ type: 'hit', gate: 0, ball: 0 });
+    expect(state.balls[0]!.vx).toBeLessThan(0);
+    expect(state.balls[0]!.vy).toBeCloseTo(0);
+    expect(ballSpeed(state.balls[0]!)).toBeCloseTo(config.launchSpeed * config.speedUpPerHit);
+    expect(state.balls[0]!.rally).toBe(1);
   });
 
   it('add english toward the side of the paddle that was hit', () => {
     const offset = paddleHalfWidth(4, config) * 0.8;
-    const ccwSide = run(radialShot(4, offset), [], 300, (e) => e.type === 'hit').state.ball;
-    const cwSide = run(radialShot(4, -offset), [], 300, (e) => e.type === 'hit').state.ball;
+    const ccwSide = run(radialShot(4, offset), [], 300, (e) => e.type === 'hit').state.balls[0]!;
+    const cwSide = run(radialShot(4, -offset), [], 300, (e) => e.type === 'hit').state.balls[0]!;
     // Tangent at angle ≈ 0 is +y: the counterclockwise side kicks the ball +y.
     expect(ccwSide.vy).toBeGreaterThan(0.1);
     expect(cwSide.vy).toBeLessThan(-0.1);
@@ -236,15 +241,15 @@ describe('paddle hits', () => {
   it('always send the ball back toward the center by at least minRadialShare', () => {
     const offset = paddleHalfWidth(4, config) * 0.99;
     const { state } = run(radialShot(4, offset), [], 300, (e) => e.type === 'hit');
-    const { x, y, vx, vy } = state.ball;
-    const inward = -(x * vx + y * vy) / (Math.hypot(x, y) * ballSpeed(state.ball));
+    const { x, y, vx, vy } = state.balls[0]!;
+    const inward = -(x * vx + y * vy) / (Math.hypot(x, y) * ballSpeed(state.balls[0]!));
     expect(inward).toBeGreaterThanOrEqual(config.minRadialShare - 1e-9);
   });
 
   it('speed up each hit, up to the cap', () => {
     const fast = { ...radialShot(4, 0, config.maxSpeed * 0.99) };
     const { state } = run(fast, [], 300, (e) => e.type === 'hit');
-    expect(ballSpeed(state.ball)).toBeCloseTo(config.maxSpeed);
+    expect(ballSpeed(state.balls[0]!)).toBeCloseTo(config.maxSpeed);
   });
 
   it('never let a fast ball through the paddle', () => {
@@ -255,8 +260,40 @@ describe('paddle hits', () => {
       const start = 0.3 + (k % 7) * 0.013;
       const state = inPlay(8, Math.cos(angle) * start, Math.sin(angle) * start, Math.cos(angle) * config.maxSpeed, Math.sin(angle) * config.maxSpeed);
       const { events } = run(state, [], 120, (e) => e.type === 'hit' || e.type === 'goal');
-      expect(events.at(-1)).toEqual({ type: 'hit', gate: 0 });
+      expect(events.at(-1)).toEqual({ type: 'hit', gate: 0, ball: 0 });
     }
+  });
+});
+
+describe('several balls', () => {
+  // Two balls from the center: one straight at gate 0's paddle, one into gate 2 past its paddle.
+  const pastPaddle2 = gateCenter(2, 4) + (paddleHalfWidth(4, config) + gateHalfWidth(4, config)) / 2;
+  const two = (): GameState => {
+    const [hit] = radialShot(4, 0).balls;
+    const [goal] = radialShot(4, pastPaddle2).balls;
+    return { ...createGame(4, 1, config), respawnTicks: 0, balls: [hit!, { ...goal!, lastTouch: 1 }] };
+  };
+
+  it('moves every ball, and says which ball each event is about', () => {
+    const { events } = run(two(), [], 300, (e) => e.type === 'goal');
+    expect(events).toContainEqual({ type: 'hit', gate: 0, ball: 0 });
+    expect(events.at(-1)).toEqual({ type: 'goal', gate: 2, scorer: 1, ball: 1 });
+  });
+
+  it('takes a ball that goes in off the board, scoring it, and plays on with the rest', () => {
+    const { state } = run(two(), [], 300, (e) => e.type === 'goal');
+    expect(state.balls).toHaveLength(1);
+    expect(state.balls[0]!.lastTouch).toBe(0); // The one gate 0 hit.
+    expect(state.scores).toEqual([0, 1, 0, 0]);
+    expect(state.goals).toBe(1);
+    expect(state.respawnTicks).toBe(0);
+  });
+
+  it('waits to launch again only once the last ball is gone', () => {
+    const lone = touchedBy(radialShot(4, pastPaddle2), 1);
+    const { state } = run(lone, [], 300, (e) => e.type === 'goal');
+    expect(state.balls).toEqual([{ x: 0, y: 0, vx: 0, vy: 0, lastTouch: -1, rally: 0 }]);
+    expect(state.respawnTicks).toBe(Math.round(config.respawnDelay * TICK_RATE));
   });
 });
 
@@ -265,12 +302,12 @@ describe('the rim', () => {
   const pastPaddle = (paddleHalfWidth(4, config) + gateHalfWidth(4, config)) / 2 + paddleHalfWidth(4, config) / 2;
 
   it('scores a goal for the last paddle to touch the ball', () => {
-    const { state, events } = run({ ...radialShot(4, pastPaddle), lastTouch: 2 }, [], 300, (e) => e.type === 'goal');
-    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: 2 });
+    const { state, events } = run(touchedBy(radialShot(4, pastPaddle), 2), [], 300, (e) => e.type === 'goal');
+    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: 2, ball: 0 });
     expect(state.scores).toEqual([0, 0, 1, 0]);
     expect(state.goals).toBe(1);
-    expect(state.lastTouch).toBe(-1);
-    expect(state.ball).toEqual({ x: 0, y: 0, vx: 0, vy: 0 });
+    expect(state.balls[0]!.lastTouch).toBe(-1);
+    expect(state.balls).toEqual([{ x: 0, y: 0, vx: 0, vy: 0, lastTouch: -1, rally: 0 }]);
     expect(state.respawnTicks).toBe(Math.round(config.respawnDelay * TICK_RATE));
   });
 
@@ -279,10 +316,10 @@ describe('the rim', () => {
     ['it was an own goal', 0, []],
     ['the last toucher has left', 2, [2]],
   ])('gives nobody the point when %s, but still counts the goal', (_label, lastTouch, gone) => {
-    let start: GameState = { ...radialShot(4, pastPaddle), lastTouch };
+    let start: GameState = touchedBy(radialShot(4, pastPaddle), lastTouch);
     for (const gate of gone) start = setGateActive(start, gate, false);
     const { state, events } = run(start, [], 300, (e) => e.type === 'goal');
-    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: -1 });
+    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: -1, ball: 0 });
     expect(state.scores).toEqual([0, 0, 0, 0]);
     expect(state.goals).toBe(1);
   });
@@ -290,19 +327,19 @@ describe('the rim', () => {
   it('remembers the last paddle hit, and forgets it at the next launch', () => {
     // Straight at gate 0's paddle, from the center.
     const hit = run(radialShot(4, 0), [], 300, (e) => e.type === 'hit');
-    expect(hit.events.at(-1)).toEqual({ type: 'hit', gate: 0 });
-    expect(hit.state.lastTouch).toBe(0);
-    const relaunched = run({ ...createGame(4, 1, config), respawnTicks: 1, lastTouch: 3 }, [], 1);
+    expect(hit.events.at(-1)).toEqual({ type: 'hit', gate: 0, ball: 0 });
+    expect(hit.state.balls[0]!.lastTouch).toBe(0);
+    const relaunched = run(touchedBy({ ...createGame(4, 1, config), respawnTicks: 1 }, 3), [], 1);
     expect(relaunched.events).toEqual([{ type: 'launch' }]);
-    expect(relaunched.state.lastTouch).toBe(-1);
+    expect(relaunched.state.balls[0]!.lastTouch).toBe(-1);
   });
 
   it('bounces off wall without changing speed', () => {
     const { state, events } = run(radialShot(4, Math.PI / 4), [], 300, (e) => e.type === 'wall');
     expect(events.at(-1)).toEqual({ type: 'wall' });
-    const { x, y, vx, vy } = state.ball;
+    const { x, y, vx, vy } = state.balls[0]!;
     expect(x * vx + y * vy).toBeLessThan(0); // Heading back in.
-    expect(ballSpeed(state.ball)).toBeCloseTo(config.launchSpeed);
+    expect(ballSpeed(state.balls[0]!)).toBeCloseTo(config.launchSpeed);
   });
 
   it('keeps a plain reflection on the same diameter when jitter is off', () => {
@@ -313,7 +350,7 @@ describe('the rim', () => {
       state = result.state;
       if (result.events.some((e) => e.type === 'wall')) break;
     }
-    const { x, y, vx, vy } = state.ball;
+    const { x, y, vx, vy } = state.balls[0]!;
     expect(x * vy - y * vx).toBeCloseTo(0, 9); // Still heading through the center.
   });
 
@@ -321,19 +358,19 @@ describe('the rim', () => {
     const turns: number[] = [];
     for (let seed = 0; seed < 200; seed++) {
       let state = { ...radialShot(4, Math.PI / 4), seed };
-      let before = state.ball;
+      let before = state.balls[0]!;
       for (let i = 0; i < 300; i++) {
-        before = state.ball;
+        before = state.balls[0]!;
         const result = step(state, [], config);
         state = result.state;
         if (result.events.some((e) => e.type === 'wall')) break;
       }
-      const { x, y, vx, vy } = state.ball;
+      const { x, y, vx, vy } = state.balls[0]!;
       // A plain reflection of a radial ball sends it straight back: -v.
       const turn = Math.abs(angleDiff(Math.atan2(vy, vx), Math.atan2(-before.vy, -before.vx)));
       turns.push(turn);
       expect(turn).toBeLessThanOrEqual(config.wallJitter + 1e-9);
-      expect(ballSpeed(state.ball)).toBeCloseTo(config.launchSpeed);
+      expect(ballSpeed(state.balls[0]!)).toBeCloseTo(config.launchSpeed);
       expect(x * vx + y * vy).toBeLessThan(0);
     }
     // The turns are spread across the range, not all zero.
@@ -351,7 +388,7 @@ describe('the rim', () => {
         seed,
       };
       const { state } = run(start, [], 30, (e) => e.type === 'wall');
-      const { x, y, vx, vy } = state.ball;
+      const { x, y, vx, vy } = state.balls[0]!;
       expect(x * vx + y * vy).toBeLessThan(0);
     }
   });
@@ -396,8 +433,8 @@ describe('invariants', () => {
           return r < 0.33 ? -1 : r < 0.66 ? 0 : 1;
         });
         state = step(state, inputs, config).state;
-        maxR = Math.max(maxR, Math.hypot(state.ball.x, state.ball.y));
-        expect(ballSpeed(state.ball)).toBeLessThanOrEqual(config.maxSpeed + 1e-9);
+        maxR = Math.max(maxR, Math.hypot(state.balls[0]!.x, state.balls[0]!.y));
+        expect(ballSpeed(state.balls[0]!)).toBeLessThanOrEqual(config.maxSpeed + 1e-9);
       }
       return { state, maxR };
     };

@@ -3,7 +3,7 @@
 // they would in their own browser tab.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoomSession, type SessionListener } from '../../src/room/session';
-import type { InputMessage, RoomEvent, RosterEntry, SeatedRoom } from '../../src/types';
+import { PROTOCOL_VERSION, type InputMessage, type RoomEvent, type RosterEntry, type SeatedRoom } from '../../src/types';
 import { admin, createPlayer, delay, waitFor, type TestPlayer } from './helpers';
 
 // RoomSession imports the app client module; the tests always pass a client explicitly.
@@ -189,7 +189,7 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10 }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, protocol: PROTOCOL_VERSION }]);
     }
   });
 
@@ -204,7 +204,7 @@ describe('startMatch', () => {
     ]);
     expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10 }]);
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, protocol: PROTOCOL_VERSION }]);
   });
 
   it('adds bots past the room size, up to 8 gates', async () => {

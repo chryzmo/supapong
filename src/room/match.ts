@@ -55,7 +55,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
   session.listen({
     input(message) {
       host?.applyInput(message.seat, message.dir, message.paddle);
-      if (message.save) host?.claimSave(message.seat, message.save.tick, message.save.paddle);
+      if (message.save) host?.claimSave(message.seat, message.save.tick, message.save.paddle, message.save.ball);
     },
     state: (message) => client?.onState(message),
     playerGone: (playerId) => host?.removePlayer(playerId),
@@ -78,7 +78,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     draw(canvas, state, config, renderView(state, now));
     const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
     const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-    hud.textContent = finalScores ? 'Final score' : `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${state.rally}`;
+    hud.textContent = finalScores ? 'Final score' : `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${Math.max(...state.balls.map((b) => b.rally))}`;
   });
 
   function renderView(state: GameState, now: number): RenderView {

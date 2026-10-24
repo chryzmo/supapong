@@ -188,7 +188,7 @@ export function sandboxScreen(actions: SandboxActions): View {
         ...(over ? { centerText: 'Match over' } : state.tick < config.respawnDelay * TICK_RATE ? { centerText: 'Ready' } : {}),
       });
       const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-      hud.textContent = `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${state.rally} · speed ${ballSpeed(state.ball).toFixed(2)}`;
+      hud.textContent = `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${Math.max(...state.balls.map((b) => b.rally))} · speed ${Math.max(...state.balls.map(ballSpeed)).toFixed(2)}`;
     },
   );
 

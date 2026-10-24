@@ -7,4 +7,4 @@ Designs for work we haven't started yet.  Each file says what we'd build, why, a
 | [GitHub feedback](github-feedback.md) | Ready to start; one decision open |
 | [Anti-cheat with Edge Functions](anti-cheat.md) | Phases 0 and 1 done; the rest a draft |
 | [Spectators](spectators.md) | Ready to start |
-| [Power-ups and modifiers](power-ups.md) | Decided; ready for phase 1 |
+| [Power-ups and modifiers](power-ups.md) | Phase 1 done; phase 2 next |

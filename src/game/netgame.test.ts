@@ -65,9 +65,9 @@ describe('HostGame', () => {
     const { states, advance } = hostHarness();
     expect(states[0]!.respawn).toBe(COUNTDOWN_SECONDS * TICK_RATE);
     advance(COUNTDOWN_SECONDS * 1000 - 100);
-    expect(states.at(-1)!.ball.slice(2)).toEqual([0, 0]);
+    expect(states.at(-1)!.balls[0]!.slice(2, 4)).toEqual([0, 0]);
     advance(200);
-    expect(Math.hypot(states.at(-1)!.ball[2], states.at(-1)!.ball[3])).toBeGreaterThan(0);
+    expect(Math.hypot(states.at(-1)!.balls[0]![2], states.at(-1)!.balls[0]![3])).toBeGreaterThan(0);
   });
 
   it('applies inputs by seat, and only to that seat\'s gate', () => {
@@ -187,8 +187,7 @@ describe('HostGame saves', () => {
     return {
       ...game,
       respawnTicks: 0,
-      lastTouch: gate === 2 ? 0 : 2,
-      ball: { x: 0, y: 0, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed },
+      balls: [{ x: 0, y: 0, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, lastTouch: gate === 2 ? 0 : 2, rally: 0 }],
       gates: game.gates.map((g, i) => (i === gate ? { ...g, paddle: angle + paddleTravel(3, config) } : g)),
     };
   }
@@ -220,9 +219,9 @@ describe('HostGame saves', () => {
     expect(host.claimSave(2, crossing, gateCenter(1, 3))).toBe(true); // Seat 2 is gate 1.
     advance((CLAIM_WINDOW_TICKS + 30) * TICK_MS);
     expect(goals(events)).toEqual([]);
-    const { ball } = host.view();
+    const ball = host.view().balls[0]!;
     expect(ball.x * ball.vx + ball.y * ball.vy).toBeLessThan(0); // Heading back in.
-    expect(states.at(-1)!.touch).toBe(1);
+    expect(states.at(-1)!.balls[0]![4]).toBe(1); // Last touched by gate 1.
     expect(states.at(-1)!.goals).toBe(0);
   });
 
@@ -237,6 +236,13 @@ describe('HostGame saves', () => {
     expect(host.claimSave(seat, crossing, paddle)).toBe(false);
     advance(CLAIM_WINDOW_TICKS * TICK_MS);
     expect(goals(events)).toHaveLength(1);
+  });
+
+  it('refuses a claim naming a ball that never reached the paddle', () => {
+    const { host, advance } = hostHarness(config, gates, shotAt(1));
+    toGoal(advance);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3), 1)).toBe(false);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3), 0)).toBe(true);
   });
 
   it('refuses a claim that arrives after the window', () => {
@@ -316,7 +322,7 @@ describe('HostGame saves', () => {
     // The guest's screen never showed the ball going in, and showed it
     // coming back off their paddle.
     expect(drawn.every((s) => s.respawnTicks === 0)).toBe(true);
-    expect(drawn.some((s) => s.lastTouch === 1 && s.ball.x * s.ball.vx + s.ball.y * s.ball.vy < 0)).toBe(true);
+    expect(drawn.some((s) => s.balls[0]!.lastTouch === 1 && s.balls[0]!.x * s.balls[0]!.vx + s.balls[0]!.y * s.balls[0]!.vy < 0)).toBe(true);
   });
 
   it('waits out a pending goal before ending on the clock', () => {
@@ -389,7 +395,7 @@ describe('ClientGame', () => {
   it("eases toward the host's paddle once it stops moving", () => {
     const { client, tick } = clientHarness();
     const hostPaddle = gateCenter(1, 3) + 0.1;
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 10, rally: 0 });
+    client.onState({ tick: 3, balls: [[0, 0, 0, 0, -1, 0]], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, respawn: 10 });
     tick(0);
     for (let i = 0; i < 60; i++) tick(16);
     expect(client.predictedPaddle()).toBeCloseTo(hostPaddle, 3);
@@ -403,14 +409,14 @@ describe('ClientGame', () => {
     client.setOwnInput(0);
     const stopped = client.predictedPaddle();
     // A snapshot from before the host heard about the release: our paddle still going.
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, stopped + 0.1, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 10, rally: 0 });
+    client.onState({ tick: 3, balls: [[0, 0, 0, 0, -1, 0]], paddles: [0, stopped + 0.1, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, respawn: 10 });
     for (let i = 0; i < 20; i++) tick(16);
     expect(client.predictedPaddle()).toBeCloseTo(stopped, 9);
   });
 
   it("doesn't draw a predicted paddle for a gate that's been walled off", () => {
     const { client, tick } = clientHarness();
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 0, rally: 0 });
+    client.onState({ tick: 3, balls: [[0, 0, 0, 0, -1, 0]], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, respawn: 0 });
     client.setOwnInput(1);
     expect(tick(200).gates[1]).toEqual({ paddle: 2.1, active: false });
   });

@@ -22,18 +22,15 @@ const CLOCK_SNAP_MS = 250;
 const round = (v: number): number => Math.round(v * 1e4) / 1e4;
 
 export function encodeState(state: GameState): StateMessage {
-  const { x, y, vx, vy } = state.ball;
   return {
     tick: state.tick,
-    ball: [round(x), round(y), round(vx), round(vy)],
+    balls: state.balls.map((b) => [round(b.x), round(b.y), round(b.vx), round(b.vy), b.lastTouch, b.rally]),
     paddles: state.gates.map((g) => round(g.paddle)),
     active: state.gates.map((g) => g.active),
     scores: [...state.scores],
     goals: state.goals,
-    touch: state.lastTouch,
     seed: state.seed,
     respawn: state.respawnTicks,
-    rally: state.rally,
   };
 }
 
@@ -43,16 +40,13 @@ export function encodeState(state: GameState): StateMessage {
  * version doesn't send one.
  */
 export function decodeState(message: StateMessage): GameState {
-  const [x, y, vx, vy] = message.ball;
   return {
     tick: message.tick,
-    ball: { x, y, vx, vy },
+    balls: message.balls.map(([x, y, vx, vy, lastTouch, rally]) => ({ x, y, vx, vy, lastTouch, rally })),
     gates: message.paddles.map((paddle, i) => ({ paddle, active: message.active[i] ?? false })),
     scores: [...message.scores],
     goals: message.goals,
-    lastTouch: message.touch,
     respawnTicks: message.respawn,
-    rally: message.rally,
     seed: message.seed ?? 0,
   };
 }

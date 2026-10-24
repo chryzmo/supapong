@@ -7,7 +7,7 @@ const TICK_MS = DT * 1000;
 
 function playing(ticks: number): GameState[] {
   const states: GameState[] = [];
-  let state: GameState = { ...createGame(3, 5, DEFAULT_CONFIG), respawnTicks: 0, ball: { x: 0, y: 0, vx: 0.6, vy: 0.2 } };
+  let state: GameState = { ...createGame(3, 5, DEFAULT_CONFIG), respawnTicks: 0, balls: [{ x: 0, y: 0, vx: 0.6, vy: 0.2, lastTouch: -1, rally: 0 }] };
   for (let i = 0; i < ticks; i++) {
     state = step(state, [1, 0, -1], DEFAULT_CONFIG).state;
     states.push(state);
@@ -17,20 +17,22 @@ function playing(ticks: number): GameState[] {
 
 describe('encodeState / decodeState', () => {
   it('round-trips through JSON and the parser, to 4 decimal places', () => {
-    const state = { ...playing(10).at(-1)!, lastTouch: 2 };
+    const last = playing(10).at(-1)!;
+    const state = { ...last, balls: last.balls.map((b) => ({ ...b, lastTouch: 2, rally: 4 })) };
     const wire = parseStateMessage(JSON.parse(JSON.stringify(encodeState(state))));
     expect(wire).not.toBeNull();
     const back = decodeState(wire!);
     expect(back.tick).toBe(state.tick);
     expect(back.scores).toEqual(state.scores);
-    expect(back.lastTouch).toBe(2);
-    expect(back.ball.x).toBeCloseTo(state.ball.x, 4);
+    expect(back.balls[0]!.lastTouch).toBe(2);
+    expect(back.balls[0]!.rally).toBe(4);
+    expect(back.balls[0]!.x).toBeCloseTo(state.balls[0]!.x, 4);
     expect(back.gates.map((g) => g.paddle)).toEqual(state.gates.map((g) => expect.closeTo(g.paddle, 4) as number));
     expect(back.gates.map((g) => g.active)).toEqual([true, true, true]);
   });
 
   it('stays small', () => {
-    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25, lastTouch: 7, seed: 4294967295 }));
+    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25, balls: [{ x: -0.123456, y: 0.654321, vx: -1.234567, vy: 2.345678, lastTouch: 7, rally: 12 }], seed: 4294967295 }));
     expect(json.length).toBeLessThan(300);
   });
 });
@@ -52,20 +54,20 @@ describe('SnapshotBuffer', () => {
     const now = 10_000 + 21 * TICK_MS + 40;
     const drawn = buffer.sample(now)!;
     const expected = states.find((s) => s.tick === 21 - INTERP_DELAY_MS / TICK_MS)!;
-    expect(drawn.ball.x).toBeCloseTo(expected.ball.x, 6);
+    expect(drawn.balls[0]!.x).toBeCloseTo(expected.balls[0]!.x, 6);
     // Halfway between snapshots 15 and 18 (tick 16.5): x is between theirs.
     const between = buffer.sample(now + 1.5 * TICK_MS)!;
     const a = states.find((s) => s.tick === 16)!;
     const b = states.find((s) => s.tick === 17)!;
-    expect(between.ball.x).toBeGreaterThan(a.ball.x);
-    expect(between.ball.x).toBeLessThan(b.ball.x);
+    expect(between.balls[0]!.x).toBeGreaterThan(a.balls[0]!.x);
+    expect(between.balls[0]!.x).toBeLessThan(b.balls[0]!.x);
   });
 
   it('replays the physics between snapshots, so bounces land where the host had them', () => {
     // A fast ball, long enough for several paddle and wall bounces.
     const fast = { ...DEFAULT_CONFIG, launchSpeed: 3 };
     const host: GameState[] = [];
-    let state: GameState = { ...createGame(3, 9, fast), respawnTicks: 0, ball: { x: 0, y: 0, vx: 2.2, vy: 1.1 } };
+    let state: GameState = { ...createGame(3, 9, fast), respawnTicks: 0, balls: [{ x: 0, y: 0, vx: 2.2, vy: 1.1, lastTouch: -1, rally: 0 }] };
     for (let i = 0; i < 600; i++) {
       state = step(state, [1, -1, 1].map((d) => (Math.floor(i / 40) % 2 ? d : -d)) as Dir[], fast).state;
       host.push(state);
@@ -80,7 +82,7 @@ describe('SnapshotBuffer', () => {
       const drawAt = arrival(s) + INTERP_DELAY_MS;
       while (next < snapshots.length && arrival(snapshots[next]!) <= drawAt) buffer.push(wire(snapshots[next]!), arrival(snapshots[next++]!));
       const drawn = buffer.sample(drawAt)!;
-      worst = Math.max(worst, Math.hypot(drawn.ball.x - s.ball.x, drawn.ball.y - s.ball.y));
+      worst = Math.max(worst, Math.hypot(drawn.balls[0]!.x - s.balls[0]!.x, drawn.balls[0]!.y - s.balls[0]!.y));
     }
     // Within rounding of the host (measured: 0.0001).  A straight line
     // between snapshots is off by 0.1 here, cutting the corner at each bounce.
@@ -94,7 +96,7 @@ describe('SnapshotBuffer', () => {
     // Five ticks past the newest snapshot, the ball is where the host had it.
     const drawn = buffer.sample(arrival(last) + INTERP_DELAY_MS + 5 * TICK_MS)!;
     const host = states.find((s) => s.tick === last.tick + 5)!;
-    expect(Math.hypot(drawn.ball.x - host.ball.x, drawn.ball.y - host.ball.y)).toBeLessThan(1e-9);
+    expect(Math.hypot(drawn.balls[0]!.x - host.balls[0]!.x, drawn.balls[0]!.y - host.balls[0]!.y)).toBeLessThan(1e-9);
     // And no further than the limit, however late.
     expect(buffer.sample(1e9)!.tick).toBe(last.tick + MAX_EXTRAPOLATE_TICKS);
   });
@@ -124,7 +126,7 @@ describe('SnapshotBuffer', () => {
       if (previous !== undefined) worstStep = Math.max(worstStep, Math.abs((tick - previous) * TICK_MS - 16));
       previous = tick;
       const truth = host[Math.round(tick) - 1]!;
-      if (Math.abs(tick - Math.round(tick)) < 0.01) worstBall = Math.max(worstBall, Math.hypot(drawn.ball.x - truth.ball.x, drawn.ball.y - truth.ball.y));
+      if (Math.abs(tick - Math.round(tick)) < 0.01) worstBall = Math.max(worstBall, Math.hypot(drawn.balls[0]!.x - truth.balls[0]!.x, drawn.balls[0]!.y - truth.balls[0]!.y));
     }
     // The drawing clock never jumps or stalls: each 16 ms frame moves it 16 ms, give or take 5%.
     expect(worstStep).toBeLessThanOrEqual(16 * 0.05 + 1e-9);
@@ -150,6 +152,6 @@ describe('SnapshotBuffer', () => {
     const now = arrival(snapshots.at(-1)!) + 30;
     // Within half a tick of ball travel.  Following the late arrivals would put it ~2 ticks behind.
     const halfTick = (0.6 * DT) / 2;
-    expect(Math.abs(jittery.sample(now)!.ball.x - steady.sample(now)!.ball.x)).toBeLessThan(halfTick);
+    expect(Math.abs(jittery.sample(now)!.balls[0]!.x - steady.sample(now)!.balls[0]!.x)).toBeLessThan(halfTick);
   });
 });

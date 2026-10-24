@@ -124,17 +124,19 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.shadowBlur = 0;
   });
 
-  // Ball, with a soft glow, in the color of whoever would score if it went
-  // in now (the last paddle to touch it), or white before anyone has.
+  // Balls, with a soft glow, each in the color of whoever would score if it
+  // went in now (the last paddle to touch it), or white before anyone has.
   if (state.respawnTicks === 0) {
-    const [bx, by] = toScreen(state.ball.x, state.ball.y);
-    const ballColor = view.labels[state.lastTouch]?.color ?? TEXT;
-    ctx.fillStyle = ballColor;
-    ctx.shadowColor = ballColor;
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.arc(bx, by, Math.max(3, config.ballRadius * R), 0, 2 * Math.PI);
-    ctx.fill();
+    for (const ball of state.balls) {
+      const [bx, by] = toScreen(ball.x, ball.y);
+      const ballColor = view.labels[ball.lastTouch]?.color ?? TEXT;
+      ctx.fillStyle = ballColor;
+      ctx.shadowColor = ballColor;
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(bx, by, Math.max(3, config.ballRadius * R), 0, 2 * Math.PI);
+      ctx.fill();
+    }
     ctx.shadowBlur = 0;
   }
 
