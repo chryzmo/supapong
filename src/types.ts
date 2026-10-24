@@ -132,6 +132,8 @@ export interface InputMessage {
   seat: number;
   dir: Dir;
   paddle?: number;
+  /** A save the player saw on their screen and the host may have missed (see saves.ts). */
+  save?: { tick: number; paddle: number };
 }
 
 /**
@@ -178,6 +180,10 @@ function isNumberArray(value: unknown, length?: number): value is number[] {
     (length === undefined || value.length === length) &&
     value.every((v) => typeof v === 'number' && Number.isFinite(v))
   );
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function isId(value: unknown): value is string {
@@ -236,9 +242,13 @@ export function parseInputMessage(value: unknown): InputMessage | null {
   if (!isRecord(value)) return null;
   const { seat, dir, paddle } = value;
   if (!isSeat(seat) || (dir !== -1 && dir !== 0 && dir !== 1)) return null;
-  if (paddle === undefined) return { seat, dir };
-  if (typeof paddle !== 'number' || !Number.isFinite(paddle)) return null;
-  return { seat, dir, paddle };
+  if (paddle !== undefined && !isFiniteNumber(paddle)) return null;
+  const input: InputMessage = paddle === undefined ? { seat, dir } : { seat, dir, paddle };
+  if (value.save === undefined) return input;
+  if (!isRecord(value.save)) return null;
+  const { tick, paddle: savedAt } = value.save;
+  if (!isFiniteNumber(tick) || tick < 0 || !isFiniteNumber(savedAt)) return null;
+  return { ...input, save: { tick, paddle: savedAt } };
 }
 
 export function parseStateMessage(value: unknown): StateMessage | null {

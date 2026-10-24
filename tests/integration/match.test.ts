@@ -78,7 +78,10 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   const goneIds: string[] = [];
   const host = new HostGame(hostSession, gates, 0, { config, seed: SEED, ticker: intervalTicker, onGoal: (g) => hostGoals.push(g) });
   hostSession.listen({
-    input: (m) => host.applyInput(m.seat, m.dir, m.paddle),
+    input(m) {
+      host.applyInput(m.seat, m.dir, m.paddle);
+      if (m.save) host.claimSave(m.seat, m.save.tick, m.save.paddle);
+    },
     playerGone: (id) => {
       goneIds.push(id);
       host.removePlayer(id);
@@ -90,7 +93,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
     const guest: Guest = {
       player: guestPlayers[i]!,
       session,
-      client: new ClientGame(gates, myGate, (dir, paddle) => session.sendInput({ seat: session.room.seat, dir, paddle }), { config }),
+      client: new ClientGame(gates, myGate, (dir, paddle, save) => session.sendInput({ seat: session.room.seat, dir, paddle, ...(save ? { save } : {}) }), { config }),
       events: [],
       snapshots: 0,
     };

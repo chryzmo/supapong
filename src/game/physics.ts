@@ -136,6 +136,11 @@ export function paddleHalfWidth(gateCount: number, config: PhysicsConfig): numbe
   return gateHalfWidth(gateCount, config) * config.paddleFraction;
 }
 
+/** How far from a paddle's center (as an angle) the ball still counts as hitting it: its edge overlapping the paddle's end. */
+export function paddleReach(gateCount: number, config: PhysicsConfig): number {
+  return paddleHalfWidth(gateCount, config) + config.ballRadius / config.paddleRadius;
+}
+
 /** How far the paddle center can move from the gate center, either way. */
 export function paddleTravel(gateCount: number, config: PhysicsConfig): number {
   return gateHalfWidth(gateCount, config) - paddleHalfWidth(gateCount, config);
@@ -253,8 +258,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
   const hitR = config.paddleRadius - config.ballRadius;
   const rimR = 1 - config.ballRadius;
   const paddleHalf = paddleHalfWidth(n, config);
-  // Count a hit if the ball's edge overlaps the paddle's end.
-  const paddleReach = paddleHalf + config.ballRadius / config.paddleRadius;
+  const reach = paddleReach(n, config);
 
   let remaining = DT;
   // Several collisions can happen in one tick (e.g. a hit right next to the
@@ -268,7 +272,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
       const py = y + vy * tPaddle;
       const angle = Math.atan2(py, px);
       const gate = state.gates.findIndex(
-        (g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= paddleReach,
+        (g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= reach,
       );
       if (gate !== -1) {
         const offset = Math.max(-1, Math.min(1, angleDiff(angle, state.gates[gate]!.paddle) / paddleHalf));

@@ -85,6 +85,18 @@ export class SnapshotBuffer {
     return this.snapshots.at(-1);
   }
 
+  /**
+   * The host tick sample(nowMs) shows, fractional and held within the
+   * buffered snapshots, or undefined before the first snapshot.
+   */
+  renderTick(nowMs: number): number | undefined {
+    const first = this.snapshots[0];
+    const last = this.snapshots.at(-1);
+    if (!first || !last || this.offsetMs === undefined) return undefined;
+    const tick = (nowMs - INTERP_DELAY_MS - this.offsetMs) / TICK_MS;
+    return Math.max(first.tick, Math.min(last.tick, tick));
+  }
+
   /** The state to draw at local time `nowMs`, or undefined before the first snapshot. */
   sample(nowMs: number): GameState | undefined {
     const first = this.snapshots[0];
@@ -104,6 +116,41 @@ export class SnapshotBuffer {
       }
     }
     return first;
+  }
+
+  /**
+   * Like sample(), but as if `gate`'s paddle were at `paddle` for the tick
+   * `tick` falls in and the next: what the host will show if it accepts
+   * that save claim (HostGame.claimSave does the same replay).  Steps the
+   * physics on from the last snapshot before the claim, with every other
+   * paddle as the snapshots have it, since paddles don't depend on the ball.
+   */
+  sampleWithSave(nowMs: number, gate: number, tick: number, paddle: number): GameState | undefined {
+    const renderTick = this.renderTick(nowMs);
+    const from = Math.floor(tick);
+    let base: GameState | undefined;
+    for (const snapshot of this.snapshots) if (snapshot.tick <= from) base = snapshot;
+    if (renderTick === undefined || renderTick < tick || !base) return this.sample(nowMs);
+    const still: Dir[] = base.gates.map(() => 0);
+    const advance = (s: GameState): GameState => {
+      // The claimed tick and the next, as on the host.
+      const claimed = s.tick === from || s.tick === from + 1;
+      const gates = this.paddlesAt(s.tick + 1).map((g, i) => (claimed && i === gate ? { ...g, paddle } : g));
+      return step({ ...s, gates }, still, this.config).state;
+    };
+    let s = base;
+    while (s.tick + 1 <= renderTick) s = advance(s);
+    return interpolate(s, advance(s), renderTick - s.tick);
+  }
+
+  /** The paddles as the snapshots have them at `tick`, blended, or held past the ends. */
+  private paddlesAt(tick: number): GameState['gates'] {
+    const after = this.snapshots.findIndex((s) => s.tick >= tick);
+    if (after === -1) return this.snapshots.at(-1)!.gates;
+    const b = this.snapshots[after]!;
+    const a = this.snapshots[after - 1];
+    if (!a || b.tick === tick) return b.gates;
+    return interpolate(a, b, (tick - a.tick) / (b.tick - a.tick)).gates;
   }
 
   /**

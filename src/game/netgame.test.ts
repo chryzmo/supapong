@@ -2,8 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Gate, RoomEvent, StateMessage } from '../types';
 import { ClientGame, RESEND_MS } from './client';
-import { COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
-import { DEFAULT_CONFIG, DT, TICK_RATE, gateCenter, paddleTravel, type PhysicsConfig } from './physics';
+import { CLAIM_WINDOW_TICKS, COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
+import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleTravel, type GameState, type PhysicsConfig } from './physics';
+import { INTERP_DELAY_MS } from './snapshot';
 
 const TICK_MS = DT * 1000;
 const gates: Gate[] = [
@@ -12,7 +13,7 @@ const gates: Gate[] = [
   { seat: 5, playerId: 'c', displayName: 'C' },
 ];
 
-function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG, lineup: Gate[] = gates) {
+function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG, lineup: Gate[] = gates, state?: GameState) {
   let now = 1000;
   const states: StateMessage[] = [];
   const events: RoomEvent[] = [];
@@ -21,7 +22,7 @@ function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG, lineup: Gate[] = ga
     { sendState: (m) => states.push(m), send: async (e) => void events.push(e) },
     lineup,
     0,
-    { config, seed: 3, now: () => now, ticker: () => () => {}, onEnd: (s) => ended.push(s), botSkill: 0.9 },
+    { config, seed: 3, now: () => now, ticker: () => () => {}, onEnd: (s) => ended.push(s), botSkill: 0.9, ...(state ? { state } : {}) },
   );
   host.start();
   /** Moves the clock forward and runs the ticks that came due. */
@@ -124,6 +125,167 @@ describe('HostGame', () => {
     const sent = states.length;
     advance(1000);
     expect(states.length).toBe(sent);
+  });
+});
+
+describe('HostGame saves', () => {
+  const config = { ...DEFAULT_CONFIG, matchDuration: 1e9, goalLimit: 99 };
+  const speed = 0.85;
+  const hitR = config.paddleRadius - config.ballRadius;
+  /** Host tick at which the shot reaches the paddle line. */
+  const crossing = hitR / speed / DT;
+
+  /**
+   * The ball heading straight for the middle of `gate`, whose paddle is at
+   * the gate's edge, so it misses.  Gate 2 touched it last, so it scores.
+   */
+  function shotAt(gate: number): GameState {
+    const angle = gateCenter(gate, 3);
+    const game = createGame(3, 3, config);
+    return {
+      ...game,
+      respawnTicks: 0,
+      lastTouch: gate === 2 ? 0 : 2,
+      ball: { x: 0, y: 0, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed },
+      gates: game.gates.map((g, i) => (i === gate ? { ...g, paddle: angle + paddleTravel(3, config) } : g)),
+    };
+  }
+  const goals = (events: RoomEvent[]) => events.filter((e) => e.type === 'goal');
+  /** Runs ticks until the goal in the physics, which is before it's official. */
+  const toGoal = (advance: (ms: number) => void) => advance(Math.ceil((1 - config.ballRadius) / speed / DT + 1) * TICK_MS);
+
+  it("holds a goal against a guest for the claim window, then makes it official", () => {
+    const { events, states, advance } = hostHarness(config, gates, shotAt(1));
+    toGoal(advance);
+    expect(goals(events)).toEqual([]);
+    expect(states.at(-1)!.scores).toEqual([0, 0, 0]);
+    advance(CLAIM_WINDOW_TICKS * TICK_MS);
+    expect(goals(events)).toEqual([{ type: 'goal', gate: 1, scorer: 2 }]);
+    advance(SNAPSHOT_EVERY * TICK_MS);
+    expect(states.at(-1)!.scores).toEqual([0, 0, 1]);
+    expect(states.at(-1)!.goals).toBe(1);
+  });
+
+  it("makes a goal against the host's own gate official at once", () => {
+    const { events, advance } = hostHarness(config, gates, shotAt(0));
+    toGoal(advance);
+    expect(goals(events)).toEqual([{ type: 'goal', gate: 0, scorer: 2 }]);
+  });
+
+  it("turns a goal into a save when the guest's paddle covered the ball on their screen", () => {
+    const { host, events, states, advance } = hostHarness(config, gates, shotAt(1));
+    toGoal(advance);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3))).toBe(true); // Seat 2 is gate 1.
+    advance((CLAIM_WINDOW_TICKS + 30) * TICK_MS);
+    expect(goals(events)).toEqual([]);
+    const { ball } = host.view();
+    expect(ball.x * ball.vx + ball.y * ball.vy).toBeLessThan(0); // Heading back in.
+    expect(states.at(-1)!.touch).toBe(1);
+    expect(states.at(-1)!.goals).toBe(0);
+  });
+
+  it.each([
+    ["a paddle that doesn't cover the ball", 2, gateCenter(1, 3) + 0.3],
+    ['a paddle too far from where the host had it', 2, gateCenter(1, 3) - paddleTravel(3, config)],
+    ["the host's own seat", 0, gateCenter(1, 3)],
+    ['a seat nobody holds', 7, gateCenter(1, 3)],
+  ])('refuses a claim from %s', (_label, seat, paddle) => {
+    const { host, events, advance } = hostHarness(config, gates, shotAt(1));
+    toGoal(advance);
+    expect(host.claimSave(seat, crossing, paddle)).toBe(false);
+    advance(CLAIM_WINDOW_TICKS * TICK_MS);
+    expect(goals(events)).toHaveLength(1);
+  });
+
+  it('refuses a claim that arrives after the window', () => {
+    const { host, events, advance } = hostHarness(config, gates, shotAt(1));
+    toGoal(advance);
+    advance((CLAIM_WINDOW_TICKS + 5) * TICK_MS);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3))).toBe(false);
+    expect(goals(events)).toHaveLength(1);
+  });
+
+  it('refuses a claim for a bot', () => {
+    const withBot: Gate[] = [gates[0]!, { ...gates[1]!, bot: true }, gates[2]!];
+    const { host, advance } = hostHarness(config, withBot, shotAt(1));
+    toGoal(advance);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3))).toBe(false);
+  });
+
+  it('ignores a claim where the host already had the save', () => {
+    const saved = shotAt(1);
+    const centered = { ...saved, gates: saved.gates.map((g, i) => (i === 1 ? { ...g, paddle: gateCenter(1, 3) } : g)) };
+    const { host, advance } = hostHarness(config, gates, centered);
+    advance((crossing + 3) * TICK_MS);
+    expect(host.claimSave(2, crossing, gateCenter(1, 3))).toBe(false);
+  });
+
+  it("end to end: a guest's late save stands, and their screen never shows the goal", () => {
+    const LATENCY_MS = 40;
+    let now = 1000;
+    const queue: { at: number; deliver: () => void }[] = [];
+    const later = (deliver: () => void) => queue.push({ at: now + LATENCY_MS, deliver });
+    const events: RoomEvent[] = [];
+    let client: ClientGame;
+    const host = new HostGame(
+      { sendState: (m) => later(() => client.onState(m)), send: async (e) => void events.push(e) },
+      gates,
+      0,
+      { config, now: () => now, ticker: () => () => {}, state: shotAt(1) },
+    );
+    client = new ClientGame(
+      gates,
+      1,
+      (dir, paddle, save) =>
+        later(() => {
+          host.applyInput(2, dir, paddle);
+          if (save) claims.push(host.claimSave(2, save.tick, save.paddle));
+        }),
+      { config, now: () => now },
+    );
+    const claims: boolean[] = [];
+    host.start();
+
+    // The guest's paddle starts at the gate's edge (as the host has it).  They
+    // move to the middle just in time to meet the ball as they see it: 100 ms
+    // of drawing delay plus 40 ms of network after the host had it there.
+    const center = gateCenter(1, 3);
+    const travelTime = (paddleTravel(3, config) / (config.paddleSpeed * 2 * gateHalfWidth(3, config))) * 1000;
+    const seenAt = 1000 + crossing * TICK_MS + INTERP_DELAY_MS + LATENCY_MS;
+    const pressAt = seenAt - travelTime;
+    let pressed = false;
+    let released = false;
+    const drawn: GameState[] = [];
+    for (let t = 0; t < 2500; t += 4) {
+      now = 1000 + t;
+      host.advance();
+      for (const message of queue.filter((m) => m.at <= now)) message.deliver();
+      queue.splice(0, queue.length, ...queue.filter((m) => m.at > now));
+      if (!pressed && now >= pressAt) (pressed = true), client.setOwnInput(-1);
+      if (!released && pressed && client.predictedPaddle() <= center + 1e-3) (released = true), client.setOwnInput(0);
+      // Frames from host snapshots, not the placeholder before the first arrives.
+      if (t % 16 === 0 && client.hasState()) drawn.push(client.view());
+    }
+
+    // On the host, the paddle was still on its way when the ball got there...
+    // ...but the guest's claim stood, so there was never a goal.
+    expect(claims).toEqual([true]);
+    expect(events.filter((e) => e.type === 'goal')).toEqual([]);
+    // The guest's screen never showed the ball going in, and showed it
+    // coming back off their paddle.
+    expect(drawn.every((s) => s.respawnTicks === 0)).toBe(true);
+    expect(drawn.some((s) => s.lastTouch === 1 && s.ball.x * s.ball.vx + s.ball.y * s.ball.vy < 0)).toBe(true);
+  });
+
+  it('waits out a pending goal before ending on the clock', () => {
+    const short = { ...config, matchDuration: 70 / TICK_RATE };
+    const { events, ended, advance } = hostHarness(short, gates, shotAt(1));
+    toGoal(advance);
+    advance(TICK_MS);
+    expect(ended).toEqual([]);
+    advance(CLAIM_WINDOW_TICKS * TICK_MS);
+    expect(ended).toEqual([[0, 0, 1]]);
+    expect(goals(events)).toHaveLength(1);
   });
 });
 

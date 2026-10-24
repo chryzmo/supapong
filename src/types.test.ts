@@ -120,6 +120,12 @@ describe('parseInputMessage', () => {
     expect(parseInputMessage({ seat: 3, dir: -1 })).toEqual({ seat: 3, dir: -1 });
     expect(parseInputMessage({ seat: 0, dir: 0 })).toEqual({ seat: 0, dir: 0 });
     expect(parseInputMessage({ seat: 2, dir: 1, paddle: 2.1 })).toEqual({ seat: 2, dir: 1, paddle: 2.1 });
+    expect(parseInputMessage({ seat: 2, dir: 0, paddle: 2.1, save: { tick: 63.4, paddle: 2.09 } })).toEqual({
+      seat: 2,
+      dir: 0,
+      paddle: 2.1,
+      save: { tick: 63.4, paddle: 2.09 },
+    });
   });
 
   it.each([
@@ -128,6 +134,9 @@ describe('parseInputMessage', () => {
     ['a bad seat', { seat: 8, dir: 1 }],
     ['a non-numeric paddle', { seat: 0, dir: 1, paddle: 'left' }],
     ['a NaN paddle', { seat: 0, dir: 1, paddle: Number.NaN }],
+    ['a save that isn\'t an object', { seat: 0, dir: 0, save: 63 }],
+    ['a save at a negative tick', { seat: 0, dir: 0, save: { tick: -1, paddle: 0 } }],
+    ['a save without a paddle', { seat: 0, dir: 0, save: { tick: 63 } }],
     ['nothing', null],
   ])('rejects %s', (_label, value) => {
     expect(parseInputMessage(value)).toBeNull();

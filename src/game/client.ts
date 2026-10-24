@@ -3,12 +3,20 @@
 // keys feel instant.
 import type { Gate, StateMessage } from '../types';
 import { DEFAULT_CONFIG, angleDiff, createGame, movePaddle, type Dir, type GameState, type PhysicsConfig } from './physics';
+import { detectSave, type DrawnFrame, type SaveClaim } from './saves';
 import { SnapshotBuffer, decodeState } from './snapshot';
 
 /** Share of the gap to the host's paddle closed per frame once we stop moving. */
 const RECONCILE_RATE = 0.15;
 /** While moving, resend our paddle position this often, so the host's copy can't drift. */
 export const RESEND_MS = 200;
+/** Ticks between save claims, so one save is claimed once. */
+const CLAIM_GAP_TICKS = 20;
+/**
+ * How long after a claimed save we keep drawing it before giving up on the
+ * host agreeing: its claim window plus a round trip, in ticks.
+ */
+const CLAIM_PATIENCE_TICKS = 30;
 
 export interface ClientOptions {
   config?: PhysicsConfig;
@@ -24,16 +32,25 @@ export class ClientGame {
   private ownPaddle: number;
   private lastViewAt: number | undefined;
   private lastSentAt = -Infinity;
+  private lastFrame: DrawnFrame | undefined;
+  private lastClaimTick = -Infinity;
+  /**
+   * A save we claimed, drawn locally until the host's corrected snapshots
+   * reach the screen (from `until` on), or until we give up on it.  Without
+   * this, the snapshots already on their way would show the goal first.
+   */
+  private claim: (SaveClaim & { until?: number }) | undefined;
 
   /**
    * @param sendInput Called with our direction and paddle position when the
    *   direction changes, and every RESEND_MS while moving.  Standing still
-   *   sends nothing, which keeps traffic low.
+   *   sends nothing, which keeps traffic low.  `save` is set when our screen
+   *   showed a save (see saves.ts).
    */
   constructor(
     readonly gates: Gate[],
     readonly myGate: number,
-    private readonly sendInput: (dir: Dir, paddle: number) => void,
+    private readonly sendInput: (dir: Dir, paddle: number, save?: SaveClaim) => void,
     options: ClientOptions = {},
   ) {
     this.config = options.config ?? DEFAULT_CONFIG;
@@ -45,6 +62,9 @@ export class ClientGame {
 
   onState(message: StateMessage): void {
     this.buffer.push(decodeState(message), this.now(), message.seed !== undefined);
+    // The host took our save: from this snapshot on, its version has it.
+    const claim = this.claim;
+    if (claim && claim.until === undefined && message.tick > claim.tick && message.touch === this.myGate) claim.until = message.tick;
   }
 
   hasState(): boolean {
@@ -87,10 +107,28 @@ export class ClientGame {
       this.ownPaddle += angleDiff(hostPaddle, this.ownPaddle) * RECONCILE_RATE;
     }
 
-    const state = this.buffer.sample(now) ?? this.initial;
+    const renderTick = this.buffer.renderTick(now);
+    const claim = this.claim;
+    if (claim && renderTick !== undefined && renderTick > (claim.until ?? claim.tick + CLAIM_PATIENCE_TICKS)) this.claim = undefined;
+    const state =
+      (this.claim ? this.buffer.sampleWithSave(now, this.myGate, this.claim.tick, this.claim.paddle) : this.buffer.sample(now)) ??
+      this.initial;
     const own = state.gates[this.myGate];
     if (!own?.active) return state;
+    this.checkForSave(state, renderTick);
     return { ...state, gates: state.gates.map((g, i) => (i === this.myGate ? { ...g, paddle: this.ownPaddle } : g)) };
+  }
+
+  /** Claims a save if, since the last frame, our screen showed one the host's ball doesn't. */
+  private checkForSave(state: GameState, tick: number | undefined): void {
+    if (tick === undefined) return;
+    const frame: DrawnFrame = { tick, ball: state.ball, respawnTicks: state.respawnTicks, paddle: this.ownPaddle };
+    const claim = this.lastFrame && detectSave(this.lastFrame, frame, this.gates.length, this.config);
+    this.lastFrame = frame;
+    if (!claim || claim.tick - this.lastClaimTick < CLAIM_GAP_TICKS) return;
+    this.lastClaimTick = claim.tick;
+    this.claim = claim;
+    this.sendInput(this.ownDir, this.ownPaddle, claim);
   }
 
   /** Our paddle angle as predicted locally.  Exposed for tests. */
