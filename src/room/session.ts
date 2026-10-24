@@ -181,7 +181,7 @@ export class RoomSession {
     if (!this.isHost) throw new Error('Only the host can start the match.');
     const humans: Gate[] = this.roster.map(({ seat, playerId, displayName }) => ({ seat, playerId, displayName }));
     if (humans.length < MIN_PLAYERS) throw new Error(`Need at least ${MIN_PLAYERS} connected players.`);
-    const gates = lineup(humans, options.bots ?? 0, this.room.maxPlayers);
+    const gates = lineup(humans, options.bots ?? 0);
 
     await setRoomStatus(this.client, this.room.id, 'playing');
     const inMatch = new Set(humans.map((gate) => gate.playerId));

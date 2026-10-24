@@ -39,8 +39,8 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
   const list = h('ul', { className: 'rooms roster' });
   const waitingFor = h('p', {});
 
-  // Host only: bots fill empty gates.  The count's choices follow the roster,
-  // since bots can only take seats no player holds.
+  // Host only: bots fill out the match, up to 8 gates whatever the room's
+  // size.  The count's choices follow the roster.
   const botsSelect = h('select', { name: 'bots' });
   const skillSelect = h('select', { name: 'bot_skill' });
   BOT_LEVELS.forEach((level, i) => skillSelect.append(h('option', { value: String(i), selected: level.label === 'Normal' }, level.label)));
@@ -69,7 +69,7 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
   const leave = leaveButton(session, actions, isHost ? 'Close room' : 'Leave room');
 
   function renderBotChoices(humans: number): void {
-    const most = maxBots(humans, room.maxPlayers);
+    const most = maxBots(humans);
     const chosen = Math.min(botCount(), most);
     botsSelect.replaceChildren(
       ...Array.from({ length: most + 1 }, (_, n) => h('option', { value: String(n), selected: n === chosen }, n === 0 ? 'None' : String(n))),
@@ -80,11 +80,13 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
   function renderRoster(roster: RosterEntry[]): void {
     if (isHost) renderBotChoices(roster.length);
     // The host sees where the bots will sit; everyone else sees open seats.
-    const bots: Gate[] = isHost ? lineup(roster, botCount(), room.maxPlayers).filter((gate) => gate.bot) : [];
+    const bots: Gate[] = isHost ? lineup(roster, botCount()).filter((gate) => gate.bot) : [];
     const botBySeat = new Map(bots.map((gate) => [gate.seat, gate]));
     const bySeat = new Map(roster.map((entry) => [entry.seat, entry]));
     const rows: HTMLElement[] = [];
-    for (let seat = 0; seat < room.maxPlayers; seat++) {
+    // Bots can sit past the room's size, so list up to the last of them.
+    const lastSeat = Math.max(room.maxPlayers, ...bots.map((gate) => gate.seat + 1));
+    for (let seat = 0; seat < lastSeat; seat++) {
       const entry = bySeat.get(seat);
       const bot = botBySeat.get(seat);
       if (bot) {

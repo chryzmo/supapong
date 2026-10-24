@@ -207,9 +207,15 @@ describe('startMatch', () => {
     expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10 }]);
   });
 
-  it("doesn't start with more bots than free seats", async () => {
+  it('adds bots past the room size, up to 8 gates', async () => {
+    const { host } = await setup(1);
+    const { gates } = await host.session.startMatch({ bots: 6 });
+    expect(gates.map((g) => g.seat)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("doesn't start with more than 8 gates", async () => {
     const { room, host } = await setup(1);
-    await expect(host.session.startMatch({ bots: 3 })).rejects.toThrow('Only 2 bots fit in this room.');
+    await expect(host.session.startMatch({ bots: 7 })).rejects.toThrow('Only 6 bots fit: a match has at most 8 gates.');
     expect(await roomStatus(room.id)).toBe('waiting');
   });
 
