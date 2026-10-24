@@ -21,8 +21,11 @@ import {
 import { SEAT_COLORS, draw, type GateLabel } from './render';
 import { onMobileBrowser, touchControls } from './touch';
 
+/** The config's numeric settings, the ones a slider can set. */
+type NumberKey = { [K in keyof PhysicsConfig]: PhysicsConfig[K] extends number ? K : never }[keyof PhysicsConfig];
+
 interface Slider {
-  key: keyof PhysicsConfig;
+  key: NumberKey;
   label: string;
   min: number;
   max: number;
@@ -42,6 +45,16 @@ const SLIDERS: Slider[] = [
   { key: 'ballRadius', label: 'Ball size', min: 0.01, max: 0.06, step: 0.002 },
 ];
 
+const POWER_UP_SLIDERS: Slider[] = [
+  { key: 'pickupVolley', label: 'Token every N hits in a rally', min: 2, max: 20, step: 1 },
+  { key: 'pickupMinSeconds', label: 'Token timer, shortest (s)', min: 1, max: 30, step: 1 },
+  { key: 'pickupMaxSeconds', label: 'Token timer, longest (s)', min: 1, max: 30, step: 1 },
+  { key: 'pickupLifetime', label: 'Token lasts (s)', min: 2, max: 30, step: 1 },
+  { key: 'wideFactor', label: 'Wide paddle size (×)', min: 1, max: 3, step: 0.1 },
+  { key: 'wideDuration', label: 'Wide paddle lasts (s)', min: 1, max: 20, step: 1 },
+  { key: 'shieldDuration', label: 'Shield lasts (s)', min: 1, max: 30, step: 1 },
+];
+
 const FLASH_TICKS = 36;
 
 export interface SandboxActions {
@@ -49,7 +62,8 @@ export interface SandboxActions {
 }
 
 export function sandboxScreen(actions: SandboxActions): View {
-  const config: PhysicsConfig = { ...DEFAULT_CONFIG };
+  // Power-ups are off for online matches (DEFAULT_CONFIG) for now, but on here.
+  const config: PhysicsConfig = { ...DEFAULT_CONFIG, powerUps: true };
   let players = 4;
   let bots = true;
   let botSkill = 0.7;
@@ -107,7 +121,13 @@ export function sandboxScreen(actions: SandboxActions): View {
     skillValue.textContent = botSkill.toFixed(2);
   });
 
-  const sliders = SLIDERS.map((spec) => {
+  const powerUpsToggle = h('input', { type: 'checkbox', checked: config.powerUps });
+  powerUpsToggle.addEventListener('change', () => {
+    config.powerUps = powerUpsToggle.checked;
+    restart();
+  });
+
+  const slider = (spec: Slider): HTMLElement => {
     const value = h('span', { className: 'muted' }, String(config[spec.key]));
     const input = h('input', {
       type: 'range',
@@ -121,7 +141,9 @@ export function sandboxScreen(actions: SandboxActions): View {
       value.textContent = input.value;
     });
     return h('label', {}, h('span', { className: 'slider-label' }, spec.label, value), input);
-  });
+  };
+  const sliders = SLIDERS.map(slider);
+  const powerUpSliders = POWER_UP_SLIDERS.map(slider);
 
   const pauseButton = h('button', { type: 'button', className: 'secondary' }, 'Pause');
   const togglePause = (): void => {
@@ -137,7 +159,9 @@ export function sandboxScreen(actions: SandboxActions): View {
 
   const copyButton = h('button', { type: 'button', className: 'secondary' }, 'Copy config');
   copyButton.addEventListener('click', () => {
-    void navigator.clipboard.writeText(JSON.stringify(config, null, 2)).then(() => {
+    // Without powerUps: DEFAULT_CONFIG keeps them off until online matches carry them.
+    const { powerUps: _, ...tuned } = config;
+    void navigator.clipboard.writeText(JSON.stringify(tuned, null, 2)).then(() => {
       copyButton.textContent = 'Copied';
       setTimeout(() => (copyButton.textContent = 'Copy config'), 1200);
     });
@@ -188,7 +212,18 @@ export function sandboxScreen(actions: SandboxActions): View {
         ...(over ? { centerText: 'Match over' } : state.tick < config.respawnDelay * TICK_RATE ? { centerText: 'Ready' } : {}),
       });
       const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-      hud.textContent = `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${Math.max(...state.balls.map((b) => b.rally))} · speed ${Math.max(...state.balls.map(ballSpeed)).toFixed(2)}`;
+      const you = state.gates[0];
+      const effects = [
+        ...(you?.wideTicks ? [`wide ${Math.ceil(you.wideTicks / TICK_RATE)}s`] : []),
+        ...(you?.shieldTicks ? [`shield ${Math.ceil(you.shieldTicks / TICK_RATE)}s`] : []),
+      ];
+      hud.textContent = [
+        `${time} left`,
+        `${state.goals}/${config.goalLimit} goals`,
+        `rally ${Math.max(...state.balls.map((b) => b.rally))}`,
+        `speed ${Math.max(...state.balls.map(ballSpeed)).toFixed(2)}`,
+        ...effects,
+      ].join(' · ');
     },
   );
 
@@ -211,6 +246,9 @@ export function sandboxScreen(actions: SandboxActions): View {
       h('label', {}, h('span', { className: 'slider-label' }, 'Bot skill', skillValue), skillSlider),
       h('h2', {}, 'Physics'),
       ...sliders,
+      h('h2', {}, 'Power-ups'),
+      h('label', { className: 'check' }, powerUpsToggle, 'Power-ups'),
+      ...powerUpSliders,
       h('div', { className: 'row' }, restartButton, pauseButton, copyButton),
     ),
   );

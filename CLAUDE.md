@@ -127,6 +127,13 @@ result_confirmations (        -- what each guest was shown; private
   - If it reaches the rim inside a gate, it's a goal.  The last paddle to touch the ball since the launch gets +1 (`goalScorer` in `physics.ts`).  Nobody scores if no paddle touched it, if it was the conceding player's own touch, or if that player has left.  The goal counts toward the goal limit either way.  The ball respawns at the center after a short delay and launches toward a random point inside a random active gate (a ball's width from its edges), so every launch reaches a paddle before it can touch a wall.
   - If it reaches the rim on a wall, it reflects, turned by a small random angle (`wallJitter`, ±0.09 rad by default) from the game's seeded PRNG.  A plain reflection keeps a ball that passes through the center on the same diameter forever, and with an even number of gates every wall faces another wall, so a launch into a wall could bounce out of everyone's reach for good.
   - It launches at 0.85 radii/s and speeds up 8% after each paddle hit, up to 3.
+- **Power-ups** (`powerUps` in the physics config; sandbox only for now, see `plans/power-ups.md`):
+  - **Tokens:** one at a time, appearing between radius 0.25 and 0.65.  One appears on a ball's every 6th consecutive hit (`pickupVolley`), or after 8–12 s of play with none on the board.  A token fades after 10 s.
+  - **Collecting:** a ball someone has touched passes through it, and its last toucher gets it.  Its whole path through the tick is checked, so a fast ball can't skip past.
+  - **Wide paddle** (40%): the collector's paddle is 1.6× wider for 8 s.
+  - **Shield** (35%): the next ball into the collector's gate bounces off like a wall, and the shield breaks.  It lasts 15 s otherwise.  A blocked ball isn't a goal.
+  - **Multiball** (25%): the ball splits into three, 20° apart, at most 3 in play.  With no room for more, it gives a wide paddle instead.  Every ball that goes in is a goal, and the next launch waits for the last.
+  - **Where the state lives:** all of it is in `GameState`, as optional fields (`pickup`, `pickupTimer`, `wideTicks` and `shieldTicks` on gates), and every roll uses the seeded PRNG.
 - A match opens with a 3-second countdown before the first launch.
 - The match ends at a fixed time limit (2 minutes) or once a total number of goals has been scored, whoever scored them: a 9-1 match is over at a limit of 10.  It counts goals, not points, because some goals score for nobody.  The room creator picks the limit (5, 10, 15, 20 or 25; default 10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
 

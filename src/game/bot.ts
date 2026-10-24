@@ -5,6 +5,7 @@ import {
   exitTime,
   gateCenter,
   paddleHalfWidth,
+  paddleWidth,
   type Dir,
   type GameState,
   type PhysicsConfig,
@@ -46,6 +47,7 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
   if (!g?.active) return 0;
   const n = state.gates.length;
   const hitR = config.paddleRadius - config.ballRadius;
+  const half = paddleHalfWidth(n, config, paddleWidth(g, config));
   // Outward balls are read once this far out; inward ones once this close in.
   const reactRadius = (1 - skill) * hitR;
   const readAheadRadius = Math.max(0, Math.min(1, (skill - 0.5) / 0.4)) * hitR;
@@ -65,12 +67,12 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
     // paddle's counterclockwise end (paddle clockwise of it) adds to it.
     const drift = vy * Math.cos(crossing) - vx * Math.sin(crossing);
     const side = drift > 0 || (drift === 0 && rally % 2 === 0) ? 1 : -1;
-    target = crossing - side * AIM_OFFSET * paddleHalfWidth(n, config);
+    target = crossing - side * AIM_OFFSET * half;
     soonest = t;
   }
 
   const diff = angleDiff(target, g.paddle);
-  const deadzone = paddleHalfWidth(n, config) * 0.25;
+  const deadzone = half * 0.25;
   if (Math.abs(diff) < deadzone) return 0;
   return diff > 0 ? 1 : -1;
 }

@@ -1,5 +1,5 @@
 // Canvas 2D drawing.  No game logic: it draws whatever state it's given.
-import { gateCenter, gateHalfWidth, paddleHalfWidth, type GameState, type PhysicsConfig } from './physics';
+import { TICK_RATE, gateCenter, gateHalfWidth, paddleHalfWidth, paddleWidth, type GameState, type Pickup, type PhysicsConfig } from './physics';
 
 /** One color per seat, chosen to stay distinct on the dark background. */
 export const SEAT_COLORS = ['#3ecf8e', '#4ea1ff', '#ff7a59', '#f5c542', '#c77dff', '#ff5c8a', '#3fd0d4', '#a3e635'] as const;
@@ -12,6 +12,8 @@ const MUTED = '#8b91a0';
 const LABEL_FONT = '600 13px system-ui, sans-serif';
 /** Distance from the rim to a label, in CSS pixels. */
 const LABEL_GAP = 18;
+/** Effects and tokens blink for their last this-many ticks, as a warning. */
+const ENDING_TICKS = 2 * TICK_RATE;
 
 export interface GateLabel {
   name: string;
@@ -85,8 +87,9 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
   ctx.fill();
 
   const gateHalf = gateHalfWidth(n, config);
-  const paddleHalf = paddleHalfWidth(n, config);
   ctx.lineCap = 'round';
+  /** On or off, four times a second, for something about to run out. */
+  const blinkOff = (ticksLeft: number): boolean => ticksLeft < ENDING_TICKS && Math.floor(state.tick / (TICK_RATE / 8)) % 2 === 1;
 
   // Walls: the rim between gates, plus any gate whose player has left.
   ctx.strokeStyle = WALL;
@@ -110,19 +113,39 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.globalAlpha = 1;
   }
 
-  // Paddles.
+  // Shields: a bright arc in the owner's color across their gate.
+  state.gates.forEach((gate, i) => {
+    if (!gate.active || !gate.shieldTicks || blinkOff(gate.shieldTicks)) return;
+    const color = view.labels[i]?.color ?? TEXT;
+    const center = gateCenter(i, n);
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+    ctx.lineWidth = Math.max(4, R * 0.025);
+    arc(1, center - gateHalf, center + gateHalf);
+    ctx.shadowBlur = 0;
+  });
+
+  // Paddles.  A wide one glows while it lasts.
   ctx.lineWidth = Math.max(5, R * 0.03);
   state.gates.forEach((gate, i) => {
     if (!gate.active) return;
     const color = view.labels[i]?.color ?? TEXT;
     ctx.strokeStyle = color;
-    if (view.scorerGate === i) {
+    const wide = !!gate.wideTicks && !blinkOff(gate.wideTicks);
+    if (view.scorerGate === i || wide) {
       ctx.shadowColor = color;
       ctx.shadowBlur = 18;
     }
-    arc(config.paddleRadius, gate.paddle - paddleHalf, gate.paddle + paddleHalf);
+    const half = paddleHalfWidth(n, config, paddleWidth(gate, config));
+    arc(config.paddleRadius, gate.paddle - half, gate.paddle + half);
     ctx.shadowBlur = 0;
   });
+
+  if (state.pickup && !blinkOff(state.pickup.ticksLeft)) {
+    const [px, py] = toScreen(state.pickup.x, state.pickup.y);
+    drawToken(ctx, px, py, Math.max(8, config.pickupRadius * R), state.pickup.kind);
+  }
 
   // Balls, with a soft glow, each in the color of whoever would score if it
   // went in now (the last paddle to touch it), or white before anyone has.
@@ -163,6 +186,53 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.font = `700 ${Math.round(R * 0.16)}px system-ui, sans-serif`;
     ctx.fillText(view.centerText, cx, cy);
   }
+}
+
+/** A token: a ring with an icon for its kind, in plain white so it isn't mistaken for a player's color. */
+function drawToken(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, kind: Pickup['kind']): void {
+  ctx.save();
+  ctx.strokeStyle = TEXT;
+  ctx.fillStyle = TEXT;
+  ctx.shadowColor = TEXT;
+  ctx.shadowBlur = 10;
+  ctx.lineWidth = Math.max(2, r * 0.14);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = Math.max(2, r * 0.16);
+  ctx.beginPath();
+  if (kind === 'wide') {
+    // A bar with arrowheads: wider.
+    const w = r * 0.55;
+    const a = r * 0.22;
+    ctx.moveTo(x - w, y);
+    ctx.lineTo(x + w, y);
+    ctx.moveTo(x - w + a, y - a);
+    ctx.lineTo(x - w, y);
+    ctx.lineTo(x - w + a, y + a);
+    ctx.moveTo(x + w - a, y - a);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w - a, y + a);
+    ctx.stroke();
+  } else if (kind === 'shield') {
+    // A shield: flat top, coming to a point.
+    const w = r * 0.42;
+    ctx.moveTo(x - w, y - w);
+    ctx.lineTo(x + w, y - w);
+    ctx.quadraticCurveTo(x + w, y + w * 0.6, x, y + w * 1.15);
+    ctx.quadraticCurveTo(x - w, y + w * 0.6, x - w, y - w);
+    ctx.stroke();
+  } else {
+    // Three balls.
+    const d = r * 0.3;
+    for (const [dx, dy] of [[0, -d], [-d * 0.95, d * 0.6], [d * 0.95, d * 0.6]] as const) {
+      ctx.moveTo(x + dx + r * 0.16, y + dy);
+      ctx.arc(x + dx, y + dy, r * 0.16, 0, 2 * Math.PI);
+    }
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function shorten(text: string, max: number): string {

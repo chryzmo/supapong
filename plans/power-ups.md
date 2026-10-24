@@ -82,6 +82,8 @@ About a day.
 
 ### Phase 2: the sandbox prototype
 
+Done: pickups, the three effects and the sandbox controls.  Tests are in `src/game/powerups.test.ts`.  In a 30-minute game of four Normal bots, about 4.4 tokens appear a minute and about 1.9 are collected.  Most shields run out before a ball comes for them.  Next: tune by playing.
+
 - **Config:** `powerUps: boolean` in `PhysicsConfig`, with pickups and the three effects inside `step()`, all seeded.
 - **Drawing:**
   - the token, as a small icon in a ring that fades as it expires;

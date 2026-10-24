@@ -42,6 +42,27 @@ export interface PhysicsConfig {
   matchDuration: number;
   /** The match ends once this many goals have been scored in total. */
   goalLimit: number;
+  /**
+   * Pickups and their effects (plans/power-ups.md).  Off by default: online
+   * matches can't carry the state in their snapshots yet, so only the
+   * sandbox turns it on.
+   */
+  powerUps: boolean;
+  /** A token appears on a ball's every this-many-th consecutive hit. */
+  pickupVolley: number;
+  /** Otherwise one appears after this many seconds (rolled between the two) with none on the board. */
+  pickupMinSeconds: number;
+  pickupMaxSeconds: number;
+  /** Seconds an uncollected token stays. */
+  pickupLifetime: number;
+  pickupRadius: number;
+  /** Wide paddle: how much wider, and for how many seconds. */
+  wideFactor: number;
+  wideDuration: number;
+  /** Seconds a shield lasts if no ball comes for it. */
+  shieldDuration: number;
+  /** Most balls in play at once; multiball won't split past this. */
+  maxBalls: number;
 }
 
 export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
@@ -59,7 +80,29 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   respawnDelay: 1.2,
   matchDuration: 120,
   goalLimit: 10,
+  powerUps: false,
+  pickupVolley: 6,
+  pickupMinSeconds: 8,
+  pickupMaxSeconds: 12,
+  pickupLifetime: 10,
+  pickupRadius: 0.06,
+  wideFactor: 1.6,
+  wideDuration: 8,
+  shieldDuration: 15,
+  maxBalls: 3,
 };
+
+/** How likely each kind of token is. */
+const PICKUP_ODDS: [PickupKind, number][] = [
+  ['wide', 0.4],
+  ['shield', 0.35],
+  ['multiball', 0.25],
+];
+/** Tokens appear between these radii: off the launch point, clear of the paddles. */
+const PICKUP_MIN_RADIUS = 0.25;
+const PICKUP_MAX_RADIUS = 0.65;
+/** How far either way the two new balls of a multiball head from the old one. */
+const MULTIBALL_SPREAD = (20 * Math.PI) / 180;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -84,6 +127,20 @@ export interface GateState {
   active: boolean;
   /** Paddle center angle. */
   paddle: number;
+  /** Ticks left of a wide paddle.  Absent or 0: normal width. */
+  wideTicks?: number;
+  /** Ticks left of a shield over the gate.  Absent or 0: none. */
+  shieldTicks?: number;
+}
+
+export type PickupKind = 'wide' | 'shield' | 'multiball';
+
+/** A token on the board, waiting for a ball someone has touched to pass through it. */
+export interface Pickup {
+  kind: PickupKind;
+  x: number;
+  y: number;
+  ticksLeft: number;
 }
 
 export interface GameState {
@@ -102,6 +159,10 @@ export interface GameState {
   respawnTicks: number;
   /** PRNG state. */
   seed: number;
+  /** With power-ups on: the token on the board, if any. */
+  pickup?: Pickup;
+  /** With power-ups on: ticks of play with an empty board until a token appears. */
+  pickupTimer?: number;
 }
 
 export type PhysicsEvent =
@@ -109,6 +170,12 @@ export type PhysicsEvent =
   /** `ball` is the index of the ball in the state before the step. */
   | { type: 'hit'; gate: number; ball: number }
   | { type: 'wall' }
+  /** A shield turned a ball away from `gate`, and broke. */
+  | { type: 'shield'; gate: number; ball: number }
+  /** A token appeared. */
+  | { type: 'spawn'; kind: PickupKind }
+  /** `ball` went through a token; `gate` (its last toucher) got it, or -1 if they've left. */
+  | { type: 'pickup'; kind: PickupKind; gate: number; ball: number }
   /** `scorer` is the gate that got the point, or -1 if nobody did. */
   | { type: 'goal'; gate: number; scorer: number; ball: number };
 
@@ -141,18 +208,24 @@ export function gateHalfWidth(gateCount: number, config: PhysicsConfig): number 
   return (config.gateFraction * Math.PI) / gateCount;
 }
 
-export function paddleHalfWidth(gateCount: number, config: PhysicsConfig): number {
-  return gateHalfWidth(gateCount, config) * config.paddleFraction;
+/** @param width The paddle's width multiplier: paddleWidth() of its gate.  1 for normal. */
+export function paddleHalfWidth(gateCount: number, config: PhysicsConfig, width = 1): number {
+  return Math.min(gateHalfWidth(gateCount, config), gateHalfWidth(gateCount, config) * config.paddleFraction * width);
 }
 
 /** How far from a paddle's center (as an angle) the ball still counts as hitting it: its edge overlapping the paddle's end. */
-export function paddleReach(gateCount: number, config: PhysicsConfig): number {
-  return paddleHalfWidth(gateCount, config) + config.ballRadius / config.paddleRadius;
+export function paddleReach(gateCount: number, config: PhysicsConfig, width = 1): number {
+  return paddleHalfWidth(gateCount, config, width) + config.ballRadius / config.paddleRadius;
 }
 
-/** How far the paddle center can move from the gate center, either way. */
-export function paddleTravel(gateCount: number, config: PhysicsConfig): number {
-  return gateHalfWidth(gateCount, config) - paddleHalfWidth(gateCount, config);
+/** How far the paddle center can move from the gate center, either way.  A wider paddle has less room. */
+export function paddleTravel(gateCount: number, config: PhysicsConfig, width = 1): number {
+  return gateHalfWidth(gateCount, config) - paddleHalfWidth(gateCount, config, width);
+}
+
+/** The width multiplier for a gate's paddle right now: wider during a wide paddle. */
+export function paddleWidth(gate: GateState, config: PhysicsConfig): number {
+  return (gate.wideTicks ?? 0) > 0 ? config.wideFactor : 1;
 }
 
 /** The active gate whose opening contains `angle`, or -1. */
@@ -191,6 +264,10 @@ export function restingBall(): BallState {
 }
 
 export function createGame(gateCount: number, seed: number, config: PhysicsConfig = DEFAULT_CONFIG): GameState {
+  if (config.powerUps) {
+    const [pickupTimer, next] = pickupDelay(seed >>> 0, config);
+    return { ...createGame(gateCount, next, { ...config, powerUps: false }), pickupTimer };
+  }
   return {
     tick: 0,
     balls: [restingBall()],
@@ -221,9 +298,9 @@ export function ballSpeed(ball: Ball): number {
  * Moves a paddle for `dt` seconds and keeps it inside its gate.  Shared by
  * step() and by clients predicting their own paddle between snapshots.
  */
-export function movePaddle(paddle: number, gate: number, gateCount: number, dir: Dir, dt: number, config: PhysicsConfig): number {
+export function movePaddle(paddle: number, gate: number, gateCount: number, dir: Dir, dt: number, config: PhysicsConfig, width = 1): number {
   const center = gateCenter(gate, gateCount);
-  const travel = paddleTravel(gateCount, config);
+  const travel = paddleTravel(gateCount, config, width);
   const speed = config.paddleSpeed * 2 * gateHalfWidth(gateCount, config);
   const offset = angleDiff(paddle, center) + dir * speed * dt;
   return wrapAngle(center + Math.max(-travel, Math.min(travel, offset)));
@@ -237,17 +314,20 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   const events: PhysicsEvent[] = [];
   const n = state.gates.length;
 
-  const gates = state.gates.map((gate, i) =>
-    gate.active ? { active: true, paddle: movePaddle(gate.paddle, i, n, inputs[i] ?? 0, DT, config) } : gate,
-  );
+  let gates = state.gates.map((gate, i) => {
+    if (!gate.active) return gate;
+    const paddle = movePaddle(gate.paddle, i, n, inputs[i] ?? 0, DT, config, paddleWidth(gate, config));
+    return config.powerUps ? tickEffects({ ...gate, paddle }) : { active: true, paddle };
+  });
 
   let next: GameState = { ...state, tick: state.tick + 1, gates };
+  if (config.powerUps) next = tickPickup(next);
 
   // Waiting at the center.
   if (state.respawnTicks > 0) {
     next.respawnTicks = state.respawnTicks - 1;
     if (next.respawnTicks === 0) {
-      const [angle, seed] = launchAngle(gates, state.seed, config);
+      const [angle, seed] = launchAngle(gates, next.seed, config);
       next.seed = seed;
       next.balls = [{ ...restingBall(), vx: Math.cos(angle) * config.launchSpeed, vy: Math.sin(angle) * config.launchSpeed }];
       events.push({ type: 'launch' });
@@ -261,38 +341,157 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   let scores = next.scores;
   let goals = next.goals;
   let seed = next.seed;
+  let pickup = next.pickup;
+  let pickupTimer = next.pickupTimer;
   for (const [index, ball] of state.balls.entries()) {
     const moved = moveBall(ball, index, gates, seed, config, events);
     seed = moved.seed;
+    if (moved.shieldBroken !== undefined) gates = gates.map((g, i) => (i === moved.shieldBroken ? withoutShield(g) : g));
     if (moved.goal) {
       const { scorer } = moved.goal;
       scores = scores.map((s, i) => (i === scorer ? s + 1 : s));
       goals++;
-    } else {
-      balls.push(moved.ball);
+      continue;
+    }
+    balls.push(moved.ball);
+    if (!config.powerUps) continue;
+
+    // Through a token, after someone has touched it: they get it.
+    const owner = moved.ball.lastTouch;
+    if (pickup && owner >= 0 && pathMeets(moved.path, pickup, config.pickupRadius + config.ballRadius)) {
+      const active = gates[owner]?.active === true;
+      // Multiball with no room for more balls gives a wide paddle instead.
+      const room = config.maxBalls - balls.length - (state.balls.length - index - 1);
+      const kind: PickupKind = pickup.kind === 'multiball' && room <= 0 ? 'wide' : pickup.kind;
+      events.push({ type: 'pickup', kind: pickup.kind, gate: active ? owner : -1, ball: index });
+      if (active && kind === 'wide') gates = gates.map((g, i) => (i === owner ? { ...g, wideTicks: Math.round(config.wideDuration * TICK_RATE) } : g));
+      if (active && kind === 'shield') gates = gates.map((g, i) => (i === owner ? { ...g, shieldTicks: Math.round(config.shieldDuration * TICK_RATE) } : g));
+      if (active && kind === 'multiball') balls.push(...splitBall(moved.ball, Math.min(2, room)));
+      pickup = undefined;
+    }
+
+    // A volley: this ball's every pickupVolley-th hit in a row.
+    const hit = moved.ball.rally > ball.rally;
+    if (!pickup && hit && moved.ball.rally % config.pickupVolley === 0) {
+      [pickup, pickupTimer, seed] = spawnPickup(seed, config);
+      events.push({ type: 'spawn', kind: pickup.kind });
     }
   }
-  next = { ...next, balls, scores, goals, seed };
+
+  if (config.powerUps && !pickup && balls.length > 0) {
+    // The timer only runs with the board empty.
+    pickupTimer = Math.max(0, (pickupTimer ?? 0) - 1);
+    if (pickupTimer === 0) {
+      [pickup, pickupTimer, seed] = spawnPickup(seed, config);
+      events.push({ type: 'spawn', kind: pickup.kind });
+    }
+  }
+
+  next = { ...next, gates, balls, scores, goals, seed };
+  if (config.powerUps) {
+    next.pickupTimer = pickupTimer ?? 0;
+    if (pickup) next.pickup = pickup;
+    else delete next.pickup;
+  }
   // The last ball gone: wait, then launch a new one.
   if (balls.length === 0) next = { ...next, balls: [restingBall()], respawnTicks: Math.round(config.respawnDelay * TICK_RATE) };
   return { state: next, events };
 }
 
+/** One tick off a gate's wide paddle and shield. */
+function tickEffects(gate: GateState): GateState {
+  const next = { ...gate };
+  if (gate.wideTicks) next.wideTicks = gate.wideTicks - 1;
+  if (gate.shieldTicks) next.shieldTicks = gate.shieldTicks - 1;
+  if (!next.wideTicks) delete next.wideTicks;
+  if (!next.shieldTicks) delete next.shieldTicks;
+  return next;
+}
+
+function withoutShield(gate: GateState): GateState {
+  const { shieldTicks: _, ...rest } = gate;
+  return rest;
+}
+
+/** One tick off the token on the board; it's gone when it runs out. */
+function tickPickup(state: GameState): GameState {
+  if (!state.pickup) return state;
+  const ticksLeft = state.pickup.ticksLeft - 1;
+  if (ticksLeft > 0) return { ...state, pickup: { ...state.pickup, ticksLeft } };
+  const { pickup: _, ...rest } = state;
+  return rest;
+}
+
+/** Ticks until the timer's next token: between pickupMinSeconds and pickupMaxSeconds.  @returns [ticks, next seed] */
+function pickupDelay(seed: number, config: PhysicsConfig): [number, number] {
+  const [r, next] = nextRandom(seed);
+  const seconds = config.pickupMinSeconds + r * Math.max(0, config.pickupMaxSeconds - config.pickupMinSeconds);
+  return [Math.max(1, Math.round(seconds * TICK_RATE)), next];
+}
+
+/** A new token, and a fresh timer.  @returns [token, timer, next seed] */
+function spawnPickup(seed: number, config: PhysicsConfig): [Pickup, number, number] {
+  const [kindRoll, s1] = nextRandom(seed);
+  const [radiusRoll, s2] = nextRandom(s1);
+  const [angleRoll, s3] = nextRandom(s2);
+  const [timer, s4] = pickupDelay(s3, config);
+  let kind = PICKUP_ODDS.at(-1)![0];
+  let total = 0;
+  for (const [candidate, odds] of PICKUP_ODDS) {
+    total += odds;
+    if (kindRoll < total) {
+      kind = candidate;
+      break;
+    }
+  }
+  const r = PICKUP_MIN_RADIUS + radiusRoll * (PICKUP_MAX_RADIUS - PICKUP_MIN_RADIUS);
+  const angle = angleRoll * 2 * Math.PI;
+  const pickup = { kind, x: r * Math.cos(angle), y: r * Math.sin(angle), ticksLeft: Math.round(config.pickupLifetime * TICK_RATE) };
+  return [pickup, timer, s4];
+}
+
+/** `count` more balls from `ball`, heading MULTIBALL_SPREAD either side of it. */
+function splitBall(ball: BallState, count: number): BallState[] {
+  return [MULTIBALL_SPREAD, -MULTIBALL_SPREAD].slice(0, Math.max(0, count)).map((turn) => {
+    const cos = Math.cos(turn);
+    const sin = Math.sin(turn);
+    return { ...ball, vx: ball.vx * cos - ball.vy * sin, vy: ball.vx * sin + ball.vy * cos };
+  });
+}
+
+/** Whether the path (a polyline) comes within `radius` of the point. */
+function pathMeets(path: [number, number][], point: { x: number; y: number }, radius: number): boolean {
+  for (let i = 1; i < path.length; i++) {
+    const [ax, ay] = path[i - 1]!;
+    const [bx, by] = path[i]!;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const length2 = dx * dx + dy * dy;
+    const t = length2 === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - ax) * dx + (point.y - ay) * dy) / length2));
+    if (Math.hypot(ax + dx * t - point.x, ay + dy * t - point.y) <= radius) return true;
+  }
+  return false;
+}
+
 interface Moved {
   ball: BallState;
   seed: number;
+  /** Where the ball went this tick: its start, each bounce, and its end. */
+  path: [number, number][];
   /** Set when the ball went into a gate; `ball` is then where it went in. */
   goal?: { gate: number; scorer: number };
+  /** The gate whose shield the ball broke. */
+  shieldBroken?: number;
 }
 
 function moveBall(ball: BallState, index: number, gates: GateState[], startSeed: number, config: PhysicsConfig, events: PhysicsEvent[]): Moved {
   let { x, y, vx, vy, rally, lastTouch } = ball;
   let seed = startSeed;
+  let shieldBroken: number | undefined;
+  const path: [number, number][] = [[x, y]];
   const n = gates.length;
   const hitR = config.paddleRadius - config.ballRadius;
   const rimR = 1 - config.ballRadius;
-  const paddleHalf = paddleHalfWidth(n, config);
-  const reach = paddleReach(n, config);
 
   let remaining = DT;
   // Several collisions can happen in one tick (e.g. a hit right next to the
@@ -305,14 +504,18 @@ function moveBall(ball: BallState, index: number, gates: GateState[], startSeed:
       const px = x + vx * tPaddle;
       const py = y + vy * tPaddle;
       const angle = Math.atan2(py, px);
-      const gate = gates.findIndex((g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= reach);
+      const gate = gates.findIndex(
+        (g) => g.active && Math.abs(angleDiff(angle, g.paddle)) <= paddleReach(n, config, paddleWidth(g, config)),
+      );
       if (gate !== -1) {
-        const offset = Math.max(-1, Math.min(1, angleDiff(angle, gates[gate]!.paddle) / paddleHalf));
+        const half = paddleHalfWidth(n, config, paddleWidth(gates[gate]!, config));
+        const offset = Math.max(-1, Math.min(1, angleDiff(angle, gates[gate]!.paddle) / half));
         [vx, vy] = paddleBounce(px, py, vx, vy, offset, config);
         // Start just inside the paddle so the next pass doesn't see the same crossing.
         const len = Math.hypot(px, py);
         x = px - (px / len) * 1e-9;
         y = py - (py / len) * 1e-9;
+        path.push([x, y]);
         remaining -= tPaddle;
         rally++;
         lastTouch = gate;
@@ -327,13 +530,19 @@ function moveBall(ball: BallState, index: number, gates: GateState[], startSeed:
       const py = y + vy * tRim;
       const angle = Math.atan2(py, px);
       const goal = gateAt(angle, gates, config);
-      if (goal !== -1) {
+      const shielded = goal !== -1 && goal !== shieldBroken && (gates[goal]!.shieldTicks ?? 0) > 0;
+      if (goal !== -1 && !shielded) {
         const scorer = goalScorer(goal, lastTouch, gates);
         events.push({ type: 'goal', gate: goal, scorer, ball: index });
-        return { ball: { x: px, y: py, vx, vy, rally, lastTouch }, seed, goal: { gate: goal, scorer } };
+        path.push([px, py]);
+        return { ball: { x: px, y: py, vx, vy, rally, lastTouch }, seed, path, goal: { gate: goal, scorer }, ...(shieldBroken !== undefined ? { shieldBroken } : {}) };
       }
-      // Wall: mirror the velocity about the rim normal, then turn it by a
-      // small random angle.
+      // Wall, or a shield (which then breaks): mirror the velocity about the
+      // rim normal, then turn it by a small random angle.
+      if (shielded) {
+        shieldBroken = goal;
+        events.push({ type: 'shield', gate: goal, ball: index });
+      }
       const nx = px / Math.hypot(px, py);
       const ny = py / Math.hypot(px, py);
       const dot = vx * nx + vy * ny;
@@ -344,8 +553,9 @@ function moveBall(ball: BallState, index: number, gates: GateState[], startSeed:
       [vx, vy] = jitterBounce(vx, vy, nx, ny, (r * 2 - 1) * config.wallJitter);
       x = px - nx * 1e-9;
       y = py - ny * 1e-9;
+      path.push([x, y]);
       remaining -= tRim;
-      events.push({ type: 'wall' });
+      if (!shielded) events.push({ type: 'wall' });
       continue;
     }
 
@@ -353,8 +563,9 @@ function moveBall(ball: BallState, index: number, gates: GateState[], startSeed:
     y += vy * remaining;
     remaining = 0;
   }
+  path.push([x, y]);
 
-  return { ball: { x, y, vx, vy, rally, lastTouch }, seed };
+  return { ball: { x, y, vx, vy, rally, lastTouch }, seed, path, ...(shieldBroken !== undefined ? { shieldBroken } : {}) };
 }
 
 /**
