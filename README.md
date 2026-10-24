@@ -197,7 +197,7 @@ make db-push   # applies them to the linked project
 
 Vite bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key) and `VITE_TURNSTILE_SITE_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make db-push` to apply new migrations to the hosted database, and then `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  If a migration fails, nothing is deployed.  Runs on `main` queue rather than overlap, so two pushes never apply migrations at once.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, a `migrate` job runs `make db-push` to apply new migrations to the hosted database.  Then a `deploy` job runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  If a migration fails, nothing is deployed, and a failed deploy can be re-run on its own.  Runs on `main` queue rather than overlap, so two pushes never apply migrations at once.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
 
 One-time setup:
 
