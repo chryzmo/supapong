@@ -10,11 +10,11 @@ Two to eight players each defend a gate on the rim. When the ball gets past your
 
 ## Quick start
 
-You need Node 24+ and a Docker-compatible runtime for the local Supabase stack.  Podman works: enable its socket (`systemctl --user enable --now podman.socket`) and set `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`.
+You need Node 24+ and a Docker-compatible runtime for the local Supabase stack.  Podman works: enable its socket (`systemctl --user enable --now podman.socket`) and set `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`.  With SELinux enforcing (Fedora), also label the Edge Functions folder so the local runtime can read it, once: `chcon -R -t container_file_t supabase/functions`.  Without it, the feedback function fails to boot locally.
 
 ```sh
 make install               # npm install; also enables the pre-commit hook
-make start                 # local Postgres, Auth, Realtime (first run downloads images)
+make start                 # local Postgres, Auth, Realtime, Edge Functions (first run downloads images)
 cp .env.example .env.local # then fill in the URL and anon key from `make status`
 make dev                   # http://127.0.0.1:5173
 ```
@@ -22,6 +22,7 @@ make dev                   # http://127.0.0.1:5173
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
 - **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Power-ups are on by default; untick them in Create room for a classic match.  In the waiting room the host picks what ends the match (5 to 25 goals, 2, 5 or 10 minutes, or no limit on one of them) and can switch power-ups on or off.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
+- **Send feedback:** the lobby's Feedback button, or Send feedback after a match.  On the hosted site it becomes a GitHub issue; locally it's only saved, in the `feedback` table.
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
 ## How it fits together
@@ -142,9 +143,9 @@ npm run check   # everything below; the pre-commit hook runs this
 
 | Layer | Tool | What it covers |
 |---|---|---|
-| Unit (`src/**/*.test.ts`) | Vitest | Physics (including a 20,000-tick determinism and containment test) and last-touch scoring, bots and match lineups, interpolation, snapshot encoding, replay and buffering under jittery arrivals, host and client with a fake clock and network (including an end-to-end late save over a simulated 40 ms link), save detection, message parsers, Presence logic, standings, stats formatting, the mobile-browser check |
-| Database (`supabase/tests/database/`) | pgTAP via `supabase test db` | Every RLS policy (tables and private channels), table grants, constraints and RPCs: who can do what, error codes, status transitions, result validation, and the cleanup job |
-| Integration (`tests/integration/`) | Vitest against the local stack | The app's own modules acting as several players: sign-in, lobby queries and goal limits, the 12-way join race, live lobby updates, Presence and seat cleanup, starting with bots, full networked matches where results get recorded, and the leaderboard and history |
+| Unit (`src/**/*.test.ts`, and the Edge Functions' pure modules) | Vitest | Physics (including a 20,000-tick determinism and containment test) and last-touch scoring, power-ups (pickups, wide paddles, shields, multiball, and a guest replay that matches the host through all of them), bots and match lineups, interpolation, snapshot encoding, replay and buffering under jittery arrivals, host and client with a fake clock and network (including an end-to-end late save over a simulated 40 ms link), save detection, message parsers, Presence logic, standings, stats formatting, the HUD, the mobile-browser check, and how feedback becomes a safe GitHub issue |
+| Database (`supabase/tests/database/`) | pgTAP via `supabase test db` | Every RLS policy (tables and private channels), table grants, constraints and RPCs: who can do what, error codes, status transitions, result validation and confirmations, match settings, feedback limits, and the cleanup job |
+| Integration (`tests/integration/`) | Vitest against the local stack | The app's own modules acting as several players: sign-in, lobby queries and goal limits, the 12-way join race, live lobby updates, Presence and seat cleanup, starting with bots, match settings from the waiting room, full networked matches (with and without power-ups) where results get recorded and confirmed, the leaderboard and history, and feedback through the real `create-issue` function |
 | Typecheck and schema drift | `tsc`, `supabase gen types` | Strict TypeScript, and generated types matching the local schema |
 
 Integration tests don't use the sign-in endpoint for their players.  They create users with the admin API and sign JWTs with the local stack's secret, which keeps runs under the local anonymous sign-in rate limit.  One test covers the real anonymous sign-in path.
@@ -250,7 +251,7 @@ npx supabase secrets set GITHUB_TOKEN=<token> --project-ref <ref>
 npx supabase secrets set GITHUB_REPO=<owner>/<repo> --project-ref <ref>
 ```
 
-Locally there's no token, so feedback is saved but never filed.  On Fedora with rootless Podman, the local Edge Functions runtime can't read `supabase/functions` until it's labeled for containers: `chcon -R -t container_file_t supabase/functions`, then restart the stack.
+Locally there's no token, so feedback is saved but never filed.
 
 ### 5. After the first deploy
 

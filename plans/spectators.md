@@ -12,7 +12,7 @@ Mostly no.  The work is permissions and data, which Postgres and Realtime alread
 
 - **Snapshots** already reach anyone on `room:{id}`.  A spectator only needs the right to read that channel, which is an RLS policy on `realtime.messages`.  An Edge Function can't relay 20 Hz broadcasts any better than Realtime does.
 - **Capping spectators per room** can't be done in a channel policy, because it can't count who's connected.  But a `spectators` table with an RPC that refuses the N+1th row, plus a policy that checks the row exists, does it in Postgres.
-- **The lineup** for someone arriving mid-match is the one real gap (see below).  Phase 2 of the [anti-cheat plan](anti-cheat.md) has an Edge Function store it in a `matches` row.  If that ships first, spectators read the lineup from there for free.  Otherwise the host rebroadcasts it, which needs no function at all.
+- **The lineup** for someone arriving mid-match is the one real gap (see below).  Phase 1.5 of the [anti-cheat plan](anti-cheat.md) has an Edge Function store it in a `matches` row.  If that ships first, spectators read the lineup from there for free.  Otherwise the host rebroadcasts it, which needs no function at all.
 
 So Edge Functions are only a side benefit here, through the anti-cheat work.  They aren't a reason to build spectating one way or another.
 

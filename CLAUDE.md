@@ -20,9 +20,9 @@ Multiplayer Pong on a circular board.  Each player defends a goal gate on the ri
 ## Stack
 
 - **Frontend:** Vite + TypeScript (strict), plain Canvas 2D.  No game framework or UI framework.
-- **Backend:** Supabase (Auth, Postgres + RLS, Realtime Broadcast and Presence).
+- **Backend:** Supabase (Auth, Postgres + RLS, Realtime Broadcast and Presence, one Edge Function for feedback).
 - **Client library:** `@supabase/supabase-js` v2.
-- **Local dev:** Supabase CLI (`npx supabase start`).  It needs a Docker-compatible runtime.  On Fedora, Podman works if you enable the socket (`systemctl --user enable --now podman.socket`) and set `DOCKER_HOST`.
+- **Local dev:** Supabase CLI (`npx supabase start`).  It needs a Docker-compatible runtime.  On Fedora, Podman works if you enable the socket (`systemctl --user enable --now podman.socket`) and set `DOCKER_HOST`.  With SELinux enforcing, label `supabase/functions` for containers once (`chcon -R -t container_file_t supabase/functions`), or the local Edge Functions runtime can't read it.
 
 ## Architecture
 
@@ -222,7 +222,7 @@ plans/               designs for work not started yet; delete a plan once it shi
 - TypeScript `strict`.  No `any`.  Message payloads are typed in `types.ts` and validated at the boundary.
 - `physics.ts` is pure and deterministic given its inputs.  Unit test it with Vitest.
 - Tests come in three layers:
-  - **Unit** (`src/**/*.test.ts`): pure code only.  Don't import `src/supabase.ts` from them.
+  - **Unit** (`src/**/*.test.ts`, and `supabase/functions/**/*.test.ts` for the functions' pure modules): pure code only.  Don't import `src/supabase.ts` from them.
   - **Database** (`supabase/tests/database/*.test.sql`, pgTAP): RLS, constraints, RPC errors and transitions.
   - **Integration** (`tests/integration/`): real app modules against the local stack, acting as different players via `actAs()`.  Test players get locally signed JWTs instead of anonymous sign-in, to stay under the auth rate limit.
 - New behavior gets a test in the lowest layer that can catch it.  `npm run check` must pass before committing.
@@ -233,7 +233,11 @@ plans/               designs for work not started yet; delete a plan once it shi
 
 ## Milestones
 
-All seven are done.  Since then: leaderboard and match history, touch controls, room-set goal limits, bots in matches, last-touch scoring, and the netcode work (physics replay on guests, paddle positions in inputs, guest save claims with host rewind).
+All seven are done.  Since then:
+- **Play:** leaderboard and match history, touch controls, bots in matches, last-touch scoring, power-ups (pickups, wide paddle, shield, multiball), and match settings in the waiting room (goal limit, length, power-ups).
+- **Netcode:** physics replay on guests, paddle positions in inputs, guest save claims with host rewind, several balls.
+- **Anti-cheat:** plausibility checks on results, guest confirmations for ranking, and per-player input topics (`plans/anti-cheat.md`).
+- **Feedback:** a dialog that files GitHub issues through the `create-issue` Edge Function.
 
 1. **Scaffold:** Vite + TypeScript, Supabase local stack, anonymous sign-in, display name.
 2. **Lobby:** schema, RLS, `join_room` RPC, live room list with x/y counts, create and join.
