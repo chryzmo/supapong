@@ -1,6 +1,6 @@
 # Arena Pong (Supabase prototype)
 
-Multiplayer Pong on a circular board.  Each player defends a goal gate on the rim.  When the ball enters your gate, every other player scores a point.  This is a prototype meant to showcase Supabase, so it uses the smallest design that works and saves the rest for later.
+Multiplayer Pong on a circular board.  Each player defends a goal gate on the rim.  When the ball enters your gate, the last player to touch the ball scores a point.  This is a prototype meant to showcase Supabase, so it uses the smallest design that works and saves the rest for later.
 
 ## Goals
 
@@ -87,8 +87,8 @@ match_results (
 - **Room channels** `room:{id}` and `room:{id}:input`.  Only seated players can join either.  Policies can't tell broadcast events apart, so traffic is split by sender: only the host may broadcast on `room:{id}`, and inputs go on `room:{id}:input`.
   - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
   - **Broadcast `input`** (client → all, on `room:{id}:input`): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.  Only the host acts on it.
-  - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
-  - **Broadcast `event`** (host → all): `start` (carries the gate order, `gates: { seat, playerId, displayName, bot? }[]`, and the room's `goalLimit`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
+  - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, respawn, rally }` (`touch` is the last gate to hit the ball, or -1), arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
+  - **Broadcast `event`** (host → all): `start` (carries the gate order, `gates: { seat, playerId, displayName, bot? }[]`, and the room's `goalLimit`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate, scorer? }`, for the flash; `scorer` is left out when nobody got the point) and `end` (`{ scores }`).
 
 ### Cleanup
 
@@ -110,18 +110,18 @@ match_results (
 - **Paddles:** each paddle is an arc at radius 0.92.  It is centered at angle φ and can only slide within its own gate's angular span.  Input changes φ at a fixed angular speed.
 - **Ball:**
   - If it crosses the paddle radius within a paddle's arc, reflect its radial velocity component.  Add tangential "english" based on how far from the paddle's center it hit.
-  - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center after a short delay and launches toward a random point inside a random active gate (a ball's width from its edges), so every launch reaches a paddle before it can touch a wall.
+  - If it reaches the rim inside a gate, it's a goal.  The last paddle to touch the ball since the launch gets +1 (`goalScorer` in `physics.ts`).  Nobody scores if no paddle touched it, if it was the conceding player's own touch, or if that player has left.  The goal counts toward the goal limit either way.  The ball respawns at the center after a short delay and launches toward a random point inside a random active gate (a ball's width from its edges), so every launch reaches a paddle before it can touch a wall.
   - If it reaches the rim on a wall, it reflects, turned by a small random angle (`wallJitter`, ±0.09 rad by default) from the game's seeded PRNG.  A plain reflection keeps a ball that passes through the center on the same diameter forever, and with an even number of gates every wall faces another wall, so a launch into a wall could bounce out of everyone's reach for good.
   - It launches at 0.85 radii/s and speeds up 8% after each paddle hit, up to 3.
 - A match opens with a 3-second countdown before the first launch.
-- The match ends at a fixed time limit (2 minutes) or once a total number of goals has been scored, whoever scored them: a 9-1 match is over at a limit of 10.  It counts goals, not points, because a goal gives a point to every other player, so points would end a big match far sooner.  The room creator picks the limit (5, 10, 15, 20 or 25; default 10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
+- The match ends at a fixed time limit (2 minutes) or once a total number of goals has been scored, whoever scored them: a 9-1 match is over at a limit of 10.  It counts goals, not points, because some goals score for nobody.  The room creator picks the limit (5, 10, 15, 20 or 25; default 10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
 
 ## Frontend
 
 - Screens are plain functions that build DOM elements and return `{ el, dispose }`.  `main.ts` switches between them.  Text goes through `textContent`, never `innerHTML`.
 - One stylesheet (`src/style.css`).  Dark theme, with the Supabase green as the accent.
 - **Board view:** each player sees the board rotated so their own gate is at the bottom.  Then everyone defends "down", and Left/Right on the keyboard move the paddle left/right on screen.  In world terms, +1 is counterclockwise, which is screen-right at the bottom.  Spectators and the sandbox without a seat get no rotation.
-- **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  A gate flashes when it concedes.  Names (cut to 10 characters) and scores sit outside the rim, upright.
+- **Look:** each seat has a fixed color (`SEAT_COLORS` in `render.ts`) for its paddle, gate line and label.  The rim between gates and any abandoned gate are drawn as gray wall.  The ball takes the color of the last paddle to touch it, the player who'd score, and is white before anyone has.  A gate flashes when it concedes, and the scorer's paddle glows.  Names (cut to 10 characters) and scores sit outside the rim, upright.
 - **Controls:** ← → or A D.  In the sandbox, Space pauses and R restarts.  On a mobile browser (`isMobileBrowser` in `touch.ts`: Client Hints, then the user agent including iPads posing as Macs, then a touch-only primary pointer), two hold-to-move buttons, ◀ and ▶, sit under the board, or either side of it on a phone held sideways.  They hold pseudo-keys in the same `PaddleInput` as the keyboard.  Spectators get none.  `?touch=1` or `?touch=0` forces them on or off.
 - **Leaderboard:** the lobby's Leaderboard button opens the top 10 players (plus your own row if you're further down) and the 10 latest matches, with an All / Mine toggle.
 - **Practice:** the sandbox is at `/#sandbox` (no sign-in needed) and behind the lobby's Practice button.  Its "Copy config" button copies the tuned physics settings as JSON for pasting into `DEFAULT_CONFIG`.

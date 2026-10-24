@@ -118,7 +118,8 @@ export type RoomEvent =
   | ({ type: 'start' } & MatchStart)
   | { type: 'closed' }
   | { type: 'removed'; playerId: string }
-  | { type: 'goal'; gate: number }
+  /** `scorer`: the gate that got the point, left out if nobody did. */
+  | { type: 'goal'; gate: number; scorer?: number }
   | { type: 'end'; scores: number[] };
 
 /** Broadcast `input` (player -> host): sent only when the direction changes. */
@@ -140,6 +141,8 @@ export interface StateMessage {
   scores: number[];
   /** Goals scored so far; the match ends at the room's goal limit. */
   goals: number;
+  /** The gate that touched the ball last (and would score), or -1.  Tints the ball. */
+  touch: number;
   /** Ticks until the ball launches; 0 while it's in play. */
   respawn: number;
   rally: number;
@@ -205,7 +208,12 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
     case 'removed':
       return isId(value.playerId) ? { type: 'removed', playerId: value.playerId } : null;
     case 'goal':
-      return isSeat(value.gate) ? { type: 'goal', gate: value.gate } : null;
+    {
+      if (!isSeat(value.gate)) return null;
+      if (value.scorer === undefined) return { type: 'goal', gate: value.gate };
+      if (!isSeat(value.scorer) || value.scorer === value.gate) return null;
+      return { type: 'goal', gate: value.gate, scorer: value.scorer };
+    }
     case 'end': {
       const scores: unknown = value.scores;
       if (!Array.isArray(scores) || scores.length < MIN_PLAYERS || scores.length > MAX_PLAYERS) return null;
@@ -226,12 +234,15 @@ export function parseInputMessage(value: unknown): InputMessage | null {
 export function parseStateMessage(value: unknown): StateMessage | null {
   if (!isRecord(value)) return null;
   const { tick, ball, paddles, active, scores, goals, respawn, rally } = value;
+  // A host still on the previous version sends no touch: draw the ball white.
+  const touch = value.touch ?? -1;
   if (!isCount(tick) || !isCount(goals) || !isCount(respawn) || !isCount(rally)) return null;
   if (!isNumberArray(ball, 4)) return null;
   if (!isNumberArray(paddles) || paddles.length < MIN_PLAYERS || paddles.length > MAX_PLAYERS) return null;
   const n = paddles.length;
   if (!Array.isArray(active) || active.length !== n || !active.every((a) => typeof a === 'boolean')) return null;
   if (!Array.isArray(scores) || scores.length !== n || !scores.every(isCount)) return null;
+  if (touch !== -1 && !(isCount(touch) && touch < n)) return null;
   const [x, y, vx, vy] = ball;
   if (x === undefined || y === undefined || vx === undefined || vy === undefined) return null;
   return {
@@ -241,6 +252,7 @@ export function parseStateMessage(value: unknown): StateMessage | null {
     active: active.filter((a): a is boolean => typeof a === 'boolean'),
     scores: scores.filter(isCount),
     goals,
+    touch,
     respawn,
     rally,
   };

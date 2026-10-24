@@ -2,7 +2,7 @@
 
 Multiplayer Pong on a circular board, built to show what [Supabase](https://supabase.com) can do as the *entire* backend of a real-time game.
 
-Two to eight players each defend a gate on the rim. When the ball gets past your paddle into your gate, every other player scores. There is no game server: browsers talk to Supabase directly, and one player's browser (the room's host) runs the physics.
+Two to eight players each defend a gate on the rim. When the ball gets past your paddle into your gate, the last player to touch it scores. There is no game server: browsers talk to Supabase directly, and one player's browser (the room's host) runs the physics.
 
 - **Frontend:** Vite and strict TypeScript, plain DOM and Canvas 2D, no frameworks.
 - **Backend:** Supabase Auth (anonymous), Postgres with Row Level Security, RPCs, and Realtime (Postgres Changes, Presence, Broadcast).
@@ -112,7 +112,7 @@ The design is host-authoritative with client-side interpolation.
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input` | on change only | `{ seat, dir }`, where `dir` is -1, 0 or 1 |
-| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
+| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
 | `event` | host → all | rare | `start` (gate order), `goal`, `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.

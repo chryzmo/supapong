@@ -27,11 +27,11 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
   const hud = h('p', { className: 'muted hud' });
   const leave = leaveButton(session, actions, isHost ? 'End match' : 'Leave match');
 
-  let flash: { gate: number; until: number } | undefined;
+  let flash: { gate: number; scorer: number; until: number } | undefined;
   let finalScores: number[] | undefined;
   let resultsTimer: ReturnType<typeof setTimeout> | undefined;
-  const onGoal = (gate: number): void => {
-    flash = { gate, until: performance.now() + FLASH_MS };
+  const onGoal = (gate: number, scorer: number): void => {
+    flash = { gate, scorer, until: performance.now() + FLASH_MS };
   };
   const onEnd = (scores: number[]): void => {
     if (finalScores) return;
@@ -55,7 +55,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     state: (message) => client?.onState(message),
     playerGone: (playerId) => host?.removePlayer(playerId),
     event(event) {
-      if (event.type === 'goal' && !host) onGoal(event.gate);
+      if (event.type === 'goal' && !host) onGoal(event.gate, event.scorer ?? -1);
       if (event.type === 'end') onEnd(event.scores);
       // After the final whistle the host leaving is expected; stay on the scores.
       if (event.type === 'closed' && !finalScores) actions.left('The host ended the match.');
@@ -78,7 +78,10 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
 
   function renderView(state: GameState, now: number): RenderView {
     const view: RenderView = { labels, viewerGate: myGate >= 0 ? myGate : null };
-    if (flash && now < flash.until) view.flashGate = flash.gate;
+    if (flash && now < flash.until) {
+      view.flashGate = flash.gate;
+      if (flash.scorer >= 0) view.scorerGate = flash.scorer;
+    }
     if (finalScores) view.centerText = 'Match over';
     else if (client && !client.hasState()) view.centerText = 'Connecting…';
     else if (state.respawnTicks > 0 && state.tick < COUNTDOWN_SECONDS * TICK_RATE) {

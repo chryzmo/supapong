@@ -261,21 +261,40 @@ describe('paddle hits', () => {
 });
 
 describe('the rim', () => {
-  it('scores a goal against the gate when the ball gets past the paddle', () => {
-    // Aim inside gate 0 but outside its paddle.
-    const angle = (paddleHalfWidth(4, config) + gateHalfWidth(4, config)) / 2 + paddleHalfWidth(4, config) / 2;
-    const { state, events } = run(radialShot(4, angle), [], 300, (e) => e.type === 'goal');
-    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0 });
-    expect(state.scores).toEqual([0, 1, 1, 1]);
+  // Aim inside gate 0 but outside its paddle.
+  const pastPaddle = (paddleHalfWidth(4, config) + gateHalfWidth(4, config)) / 2 + paddleHalfWidth(4, config) / 2;
+
+  it('scores a goal for the last paddle to touch the ball', () => {
+    const { state, events } = run({ ...radialShot(4, pastPaddle), lastTouch: 2 }, [], 300, (e) => e.type === 'goal');
+    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: 2 });
+    expect(state.scores).toEqual([0, 0, 1, 0]);
     expect(state.goals).toBe(1);
+    expect(state.lastTouch).toBe(-1);
     expect(state.ball).toEqual({ x: 0, y: 0, vx: 0, vy: 0 });
     expect(state.respawnTicks).toBe(Math.round(config.respawnDelay * TICK_RATE));
   });
 
-  it('gives no points to inactive gates', () => {
-    const angle = gateHalfWidth(4, config) * 0.9;
-    const start = setGateActive(radialShot(4, angle), 2, false);
-    expect(run(start, [], 300, (e) => e.type === 'goal').state.scores).toEqual([0, 1, 0, 1]);
+  it.each([
+    ['nobody touched it since the launch', -1, []],
+    ['it was an own goal', 0, []],
+    ['the last toucher has left', 2, [2]],
+  ])('gives nobody the point when %s, but still counts the goal', (_label, lastTouch, gone) => {
+    let start: GameState = { ...radialShot(4, pastPaddle), lastTouch };
+    for (const gate of gone) start = setGateActive(start, gate, false);
+    const { state, events } = run(start, [], 300, (e) => e.type === 'goal');
+    expect(events.at(-1)).toEqual({ type: 'goal', gate: 0, scorer: -1 });
+    expect(state.scores).toEqual([0, 0, 0, 0]);
+    expect(state.goals).toBe(1);
+  });
+
+  it('remembers the last paddle hit, and forgets it at the next launch', () => {
+    // Straight at gate 0's paddle, from the center.
+    const hit = run(radialShot(4, 0), [], 300, (e) => e.type === 'hit');
+    expect(hit.events.at(-1)).toEqual({ type: 'hit', gate: 0 });
+    expect(hit.state.lastTouch).toBe(0);
+    const relaunched = run({ ...createGame(4, 1, config), respawnTicks: 1, lastTouch: 3 }, [], 1);
+    expect(relaunched.events).toEqual([{ type: 'launch' }]);
+    expect(relaunched.state.lastTouch).toBe(-1);
   });
 
   it('bounces off wall without changing speed', () => {

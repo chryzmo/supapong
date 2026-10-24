@@ -24,6 +24,8 @@ export interface RenderView {
   viewerGate: number | null;
   /** Gate to flash, e.g. just after it conceded. */
   flashGate?: number;
+  /** Paddle to light up alongside the flash: the gate that scored. */
+  scorerGate?: number;
   /** Big text in the middle, e.g. a countdown. */
   centerText?: string;
 }
@@ -112,15 +114,23 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
   ctx.lineWidth = Math.max(5, R * 0.03);
   state.gates.forEach((gate, i) => {
     if (!gate.active) return;
-    ctx.strokeStyle = view.labels[i]?.color ?? TEXT;
+    const color = view.labels[i]?.color ?? TEXT;
+    ctx.strokeStyle = color;
+    if (view.scorerGate === i) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 18;
+    }
     arc(config.paddleRadius, gate.paddle - paddleHalf, gate.paddle + paddleHalf);
+    ctx.shadowBlur = 0;
   });
 
-  // Ball, with a soft glow.
+  // Ball, with a soft glow, in the color of whoever would score if it went
+  // in now (the last paddle to touch it), or white before anyone has.
   if (state.respawnTicks === 0) {
     const [bx, by] = toScreen(state.ball.x, state.ball.y);
-    ctx.fillStyle = TEXT;
-    ctx.shadowColor = TEXT;
+    const ballColor = view.labels[state.lastTouch]?.color ?? TEXT;
+    ctx.fillStyle = ballColor;
+    ctx.shadowColor = ballColor;
     ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(bx, by, Math.max(3, config.ballRadius * R), 0, 2 * Math.PI);

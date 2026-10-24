@@ -151,7 +151,7 @@ describe('ClientGame', () => {
   it("eases toward the host's paddle once it stops moving", () => {
     const { client, tick } = clientHarness();
     const hostPaddle = gateCenter(1, 3) + 0.1;
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, respawn: 10, rally: 0 });
+    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 10, rally: 0 });
     tick(0);
     for (let i = 0; i < 60; i++) tick(16);
     expect(client.predictedPaddle()).toBeCloseTo(hostPaddle, 3);
@@ -159,7 +159,7 @@ describe('ClientGame', () => {
 
   it("doesn't draw a predicted paddle for a gate that's been walled off", () => {
     const { client, tick } = clientHarness();
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, respawn: 0, rally: 0 });
+    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, touch: -1, respawn: 0, rally: 0 });
     client.setOwnInput(1);
     expect(tick(200).gates[1]).toEqual({ paddle: 2.1, active: false });
   });

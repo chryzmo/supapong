@@ -68,6 +68,9 @@ describe('parseRoomEvent', () => {
 
   it('accepts goal and end', () => {
     expect(parseRoomEvent({ type: 'goal', gate: 2 })).toEqual({ type: 'goal', gate: 2 });
+    expect(parseRoomEvent({ type: 'goal', gate: 2, scorer: 0 })).toEqual({ type: 'goal', gate: 2, scorer: 0 });
+    expect(parseRoomEvent({ type: 'goal', gate: 2, scorer: 2 })).toBeNull();
+    expect(parseRoomEvent({ type: 'goal', gate: 2, scorer: 9 })).toBeNull();
     expect(parseRoomEvent({ type: 'end', scores: [3, 0, 10] })).toEqual({ type: 'end', scores: [3, 0, 10] });
     expect(parseRoomEvent({ type: 'goal', gate: 9 })).toBeNull();
     expect(parseRoomEvent({ type: 'end', scores: [3, -1] })).toBeNull();
@@ -136,12 +139,18 @@ describe('parseStateMessage', () => {
     active: [true, true, false],
     scores: [1, 0, 2],
     goals: 3,
+    touch: 1,
     respawn: 0,
     rally: 4,
   };
 
   it('accepts a valid snapshot', () => {
     expect(parseStateMessage(state)).toEqual(state);
+    expect(parseStateMessage({ ...state, touch: -1 })).toEqual({ ...state, touch: -1 });
+  });
+
+  it('treats a missing touch (a host on the previous version) as nobody', () => {
+    expect(parseStateMessage({ ...state, touch: undefined })).toEqual({ ...state, touch: -1 });
   });
 
   it.each([
@@ -154,6 +163,8 @@ describe('parseStateMessage', () => {
     ['a fractional tick', { ...state, tick: 1.5 }],
     ['a missing respawn', { ...state, respawn: undefined }],
     ['missing goals', { ...state, goals: undefined }],
+    ['a touch past the last gate', { ...state, touch: 3 }],
+    ['a touch below -1', { ...state, touch: -2 }],
   ])('rejects %s', (_label, value) => {
     expect(parseStateMessage(value)).toBeNull();
   });

@@ -42,7 +42,8 @@ export interface HostOptions {
   now?: () => number;
   /** How well bot gates play, 0 to 1 (see botInput). */
   botSkill?: number;
-  onGoal?(gate: number): void;
+  /** @param scorer The gate that got the point, or -1. */
+  onGoal?(gate: number, scorer: number): void;
   onEnd?(scores: number[]): void;
 }
 
@@ -137,8 +138,9 @@ export class HostGame {
 
     for (const event of events) {
       if (event.type !== 'goal') continue;
-      this.options.onGoal?.(event.gate);
-      void this.output.send({ type: 'goal', gate: event.gate }).catch(() => {});
+      this.options.onGoal?.(event.gate, event.scorer);
+      const message: RoomEvent = event.scorer >= 0 ? { type: 'goal', gate: event.gate, scorer: event.scorer } : { type: 'goal', gate: event.gate };
+      void this.output.send(message).catch(() => {});
     }
 
     if (isOver(state, this.config)) {

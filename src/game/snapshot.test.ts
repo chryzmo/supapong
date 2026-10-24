@@ -17,19 +17,20 @@ function playing(ticks: number): GameState[] {
 
 describe('encodeState / decodeState', () => {
   it('round-trips through JSON and the parser, to 4 decimal places', () => {
-    const state = playing(10).at(-1)!;
+    const state = { ...playing(10).at(-1)!, lastTouch: 2 };
     const wire = parseStateMessage(JSON.parse(JSON.stringify(encodeState(state))));
     expect(wire).not.toBeNull();
     const back = decodeState(wire!);
     expect(back.tick).toBe(state.tick);
     expect(back.scores).toEqual(state.scores);
+    expect(back.lastTouch).toBe(2);
     expect(back.ball.x).toBeCloseTo(state.ball.x, 4);
     expect(back.gates.map((g) => g.paddle)).toEqual(state.gates.map((g) => expect.closeTo(g.paddle, 4) as number));
     expect(back.gates.map((g) => g.active)).toEqual([true, true, true]);
   });
 
   it('stays small', () => {
-    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25 }));
+    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25, lastTouch: 7 }));
     expect(json.length).toBeLessThan(260);
   });
 });

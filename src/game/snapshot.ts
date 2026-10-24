@@ -21,6 +21,7 @@ export function encodeState(state: GameState): StateMessage {
     active: state.gates.map((g) => g.active),
     scores: [...state.scores],
     goals: state.goals,
+    touch: state.lastTouch,
     respawn: state.respawnTicks,
     rally: state.rally,
   };
@@ -35,6 +36,7 @@ export function decodeState(message: StateMessage): GameState {
     gates: message.paddles.map((paddle, i) => ({ paddle, active: message.active[i] ?? false })),
     scores: [...message.scores],
     goals: message.goals,
+    lastTouch: message.touch,
     respawnTicks: message.respawn,
     rally: message.rally,
     seed: 0,

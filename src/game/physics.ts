@@ -84,8 +84,10 @@ export interface GameState {
   gates: GateState[];
   /** Points per gate. */
   scores: number[];
-  /** Goals scored so far.  Not derivable from scores: a goal gives a point to every other active gate. */
+  /** Goals scored so far, including goals that earned nobody a point. */
   goals: number;
+  /** The gate whose paddle touched the ball last since it launched, or -1. */
+  lastTouch: number;
   /** Ticks until the ball launches.  While > 0 the ball sits at the center. */
   respawnTicks: number;
   /** Consecutive paddle hits since the last launch. */
@@ -98,7 +100,8 @@ export type PhysicsEvent =
   | { type: 'launch' }
   | { type: 'hit'; gate: number }
   | { type: 'wall' }
-  | { type: 'goal'; gate: number };
+  /** `scorer` is the gate that got the point, or -1 if nobody did. */
+  | { type: 'goal'; gate: number; scorer: number };
 
 export interface StepResult {
   state: GameState;
@@ -175,6 +178,7 @@ export function createGame(gateCount: number, seed: number, config: PhysicsConfi
     gates: Array.from({ length: gateCount }, (_, i) => ({ active: true, paddle: gateCenter(i, gateCount) })),
     scores: Array.from({ length: gateCount }, () => 0),
     goals: 0,
+    lastTouch: -1,
     respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
     rally: 0,
     seed: seed >>> 0,
@@ -229,6 +233,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
       const [angle, seed] = launchAngle(gates, state.seed, config);
       next.seed = seed;
       next.rally = 0;
+      next.lastTouch = -1;
       next.ball = { x: 0, y: 0, vx: Math.cos(angle) * config.launchSpeed, vy: Math.sin(angle) * config.launchSpeed };
       events.push({ type: 'launch' });
     }
@@ -243,6 +248,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
   let { x, y, vx, vy } = state.ball;
   let rally = state.rally;
   let seed = state.seed;
+  let lastTouch = state.lastTouch;
   const n = state.gates.length;
   const hitR = config.paddleRadius - config.ballRadius;
   const rimR = 1 - config.ballRadius;
@@ -273,6 +279,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
         y = py - (py / len) * 1e-9;
         remaining -= tPaddle;
         rally++;
+        lastTouch = gate;
         events.push({ type: 'hit', gate });
         continue;
       }
@@ -285,12 +292,14 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
       const angle = Math.atan2(py, px);
       const goal = gateAt(angle, state.gates, config);
       if (goal !== -1) {
-        events.push({ type: 'goal', gate: goal });
+        const scorer = goalScorer(goal, lastTouch, state.gates);
+        events.push({ type: 'goal', gate: goal, scorer });
         return {
           ...state,
           ball: { x: 0, y: 0, vx: 0, vy: 0 },
-          scores: state.scores.map((s, i) => (i !== goal && state.gates[i]!.active ? s + 1 : s)),
+          scores: state.scores.map((s, i) => (i === scorer ? s + 1 : s)),
           goals: state.goals + 1,
+          lastTouch: -1,
           respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
           rally: 0,
           seed,
@@ -318,7 +327,21 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
     remaining = 0;
   }
 
-  return { ...state, ball: { x, y, vx, vy }, rally, seed };
+  return { ...state, ball: { x, y, vx, vy }, rally, seed, lastTouch };
+}
+
+/**
+ * Who gets the point for a goal against `gate`: the last paddle to touch the
+ * ball.  Nobody (-1) if no paddle touched it since the launch, if it was the
+ * conceding player's own touch, or if that player has since left.  The goal
+ * still counts toward the goal limit either way.
+ *
+ * Why not a point for everyone else?  Then a score only measured how often
+ * you conceded, so scores bunched up.  Last touch rewards aiming, too.
+ */
+export function goalScorer(gate: number, lastTouch: number, gates: GateState[]): number {
+  if (lastTouch < 0 || lastTouch === gate || !gates[lastTouch]?.active) return -1;
+  return lastTouch;
 }
 
 /**

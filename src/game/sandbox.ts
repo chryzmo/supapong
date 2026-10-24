@@ -57,7 +57,7 @@ export function sandboxScreen(actions: SandboxActions): View {
 
   let state = newGame();
   let prev = state;
-  let flash: { gate: number; until: number } | undefined;
+  let flash: { gate: number; scorer: number; until: number } | undefined;
   let over = false;
   let paused = false;
 
@@ -171,7 +171,7 @@ export function sandboxScreen(actions: SandboxActions): View {
       prev = state;
       state = result.state;
       const goal = result.events.find((e) => e.type === 'goal');
-      if (goal?.type === 'goal') flash = { gate: goal.gate, until: state.tick + FLASH_TICKS };
+      if (goal?.type === 'goal') flash = { gate: goal.gate, scorer: goal.scorer, until: state.tick + FLASH_TICKS };
       if (isOver(state, config)) {
         over = true;
         prev = state;
@@ -183,7 +183,7 @@ export function sandboxScreen(actions: SandboxActions): View {
       draw(canvas, shown, config, {
         labels: labels(),
         viewerGate: 0,
-        ...(flash && state.tick < flash.until ? { flashGate: flash.gate } : {}),
+        ...(flash && state.tick < flash.until ? { flashGate: flash.gate, ...(flash.scorer >= 0 ? { scorerGate: flash.scorer } : {}) } : {}),
         ...(over ? { centerText: 'Match over' } : state.tick < config.respawnDelay * TICK_RATE ? { centerText: 'Ready' } : {}),
       });
       const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
