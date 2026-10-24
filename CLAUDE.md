@@ -177,3 +177,5 @@ npm run test:integration   # app code against the local stack
 npm run check              # everything above plus typecheck; the pre-commit hook runs this
 npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```
+
+The `Makefile` wraps these, plus deploy targets (`make` lists them).  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.

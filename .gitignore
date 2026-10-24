@@ -15,6 +15,9 @@ build/
 *.log
 npm-debug.log*
 
+# Cloudflare Wrangler local state
+.wrangler/
+
 # Test coverage
 coverage/
 .nyc_output/

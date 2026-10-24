@@ -13,11 +13,13 @@ Two to eight players each defend a gate on the rim. When the ball gets past your
 You need Node 24+ and a Docker-compatible runtime for the local Supabase stack.  Podman works: enable its socket (`systemctl --user enable --now podman.socket`) and set `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`.
 
 ```sh
-npm install                # also enables the pre-commit hook
-npx supabase start         # local Postgres, Auth, Realtime (first run downloads images)
-cp .env.example .env.local # then fill in the URL and anon key from `npx supabase status`
-npm run dev                # http://127.0.0.1:5173
+make install               # npm install; also enables the pre-commit hook
+make start                 # local Postgres, Auth, Realtime (first run downloads images)
+cp .env.example .env.local # then fill in the URL and anon key from `make status`
+make dev                   # http://127.0.0.1:5173
 ```
+
+`make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
 - **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  Move with ← → or A D.
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
@@ -163,10 +165,66 @@ These are deliberate trade-offs for a prototype.  Each one is noted where it liv
 
 ## Deploying
 
-1. Create a Supabase project, then run `npx supabase link --project-ref <ref>` and `npx supabase db push`.
-2. Turn on anonymous sign-ins in the dashboard's Auth settings.  Prefer the dashboard over `supabase config push`, because `config.toml` contains local-only settings: the `127.0.0.1` site URL, the raised rate limit, and analytics turned off for Podman.
-3. Run `npm run build` and host `dist/` on any static host, with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set to the project's values.
-4. Never point the integration tests at a hosted project.  They sign tokens with the local stack's secret and create and delete users.
+The backend goes to a hosted Supabase project.  The frontend is static files (`dist/`), deployed here to [Cloudflare Pages](https://pages.cloudflare.com).  Any static host works the same way.
+
+### 1. Supabase project (once)
+
+1. Create a project at [supabase.com/dashboard](https://supabase.com/dashboard), and note its **project ref** (in the project's general settings, and in its URL) and its database password.
+2. Log in and link this repo, then check what will be applied:
+
+   ```sh
+   npx supabase login
+   make supabase-link SUPABASE_PROJECT_REF=<ref>
+   make db-diff   # lists the migrations db-push would apply
+   ```
+
+3. Turn on **anonymous sign-ins** in the dashboard's Auth settings.  Do it there rather than with `supabase config push`, because `supabase/config.toml` contains local-only settings: the `127.0.0.1` site URL, the raised anonymous rate limit, and analytics turned off for Podman.
+4. Copy the project URL and anon (publishable) key from the project's API settings.  You'll need them for the frontend.
+
+### 2. Migrations (every schema change)
+
+```sh
+make db-push   # applies new migrations to the linked project
+```
+
+### 3. Frontend on Cloudflare Pages
+
+Vite bakes `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
+
+**Option A: Cloudflare builds from Git (recommended).** In the Cloudflare dashboard, go to Workers & Pages → Create → Pages → Connect to Git, pick this repository, and set:
+
+| Setting | Value |
+|---|---|
+| Framework preset | None (or Vite) |
+| Build command | `npm run build` |
+| Build output directory | `dist` |
+| Production branch | `main` |
+| Environment variables (Production and Preview) | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` |
+
+The build uses Node 24 from [`.node-version`](.node-version).  Every push to `main` deploys to production, and other branches get preview URLs.  The `prepare` script that sets up the git hook also runs during `npm install` there, which is harmless.
+
+**Option B: build locally and upload with Wrangler.**
+
+```sh
+# Hosted values; .env.*.local files are git-ignored.
+cat > .env.production.local <<'ENV'
+VITE_SUPABASE_URL=https://<ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon key>
+ENV
+
+npx wrangler@4.149.0 login                # once; or set CLOUDFLARE_API_TOKEN
+make pages-create CF_PAGES_PROJECT=<name> # once
+make deploy-web CF_PAGES_PROJECT=<name>   # build, check, upload
+```
+
+`make deploy-web` refuses to deploy if `.env.production.local` is missing, or if the built files still point at `127.0.0.1:54321`.  Without that file, `npm run build` would quietly use `.env.local` and ship a site that talks to your laptop.  `make deploy` runs `db-push` and then `deploy-web`.
+
+### 4. After the first deploy
+
+- **Site URL:** set the Pages URL (for example `https://<name>.pages.dev`) as the **Site URL** in Supabase's Auth URL configuration.  Anonymous sign-in doesn't redirect, so nothing breaks without it today, but email or OAuth sign-in will need it.
+- **Routing:** none needed.  The app only uses `/` and `/#sandbox`, so Pages needs no single-page-app fallback rules.
+- **Before sharing the link:** turn on CAPTCHA for sign-ins.  Cloudflare Turnstile fits naturally here: create a Turnstile widget for the Pages domain, then turn on CAPTCHA protection in Supabase's Auth settings with Turnstile as the provider and the widget's secret key.  **The app doesn't send a CAPTCHA token yet**, so turning this on today blocks sign-in.  The frontend needs to render the Turnstile widget and pass its token as `options.captchaToken` to `signInAnonymously()` in [`src/auth.ts`](src/auth.ts).
+- **Tests stay local.** Never point the integration tests at a hosted project.  They sign tokens with the local stack's secret, and create and delete users.
 
 ## Project layout
 
@@ -183,6 +241,7 @@ supabase/
   tests/database/      pgTAP
 tests/integration/     app modules against the local stack
 scripts/check.sh       what `npm run check` and the pre-commit hook run
+Makefile               shortcuts for the stack, builds, tests and deploys (`make` lists them)
 ```
 
 [`CLAUDE.md`](CLAUDE.md) holds the full spec and conventions.
