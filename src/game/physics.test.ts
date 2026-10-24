@@ -10,6 +10,7 @@ import {
   gateCenter,
   gateHalfWidth,
   isOver,
+  launchAngle,
   nextRandom,
   paddleHalfWidth,
   paddleTravel,
@@ -120,6 +121,62 @@ describe('launch', () => {
     const result = step(state, [], config);
     expect(result.events).toEqual([{ type: 'launch' }]);
     expect(ballSpeed(result.state.ball)).toBeCloseTo(config.launchSpeed);
+  });
+
+  it('aims every launch inside an active gate, never at a wall or an empty gate', () => {
+    for (const n of [2, 3, 4, 5, 8]) {
+      // Gate 1 is empty (its player left).
+      const gates = setGateActive(createGame(n, 1, config), 1, false).gates;
+      const limit = gateHalfWidth(n, config) - config.ballRadius;
+      let seed = 123;
+      for (let i = 0; i < 300; i++) {
+        const [angle, next] = launchAngle(gates, seed, config);
+        seed = next;
+        const gate = gates.findIndex((_, g) => Math.abs(angleDiff(angle, gateCenter(g, n))) <= limit + 1e-12);
+        expect(gate).not.toBe(-1);
+        expect(gates[gate]!.active).toBe(true);
+      }
+    }
+  });
+
+  it('spreads launches across every active gate and both sides of each', () => {
+    const { gates } = createGame(4, 1, config);
+    const sides = new Set<string>();
+    let seed = 9;
+    for (let i = 0; i < 400; i++) {
+      const [angle, next] = launchAngle(gates, seed, config);
+      seed = next;
+      const gate = gates.findIndex((_, g) => Math.abs(angleDiff(angle, gateCenter(g, 4))) <= gateHalfWidth(4, config));
+      sides.add(`${gate}${angleDiff(angle, gateCenter(gate, 4)) > 0 ? '+' : '-'}`);
+    }
+    expect(sides.size).toBe(8);
+  });
+
+  it('still launches when no gate is active', () => {
+    const { gates } = createGame(3, 1, config);
+    const [angle] = launchAngle(gates.map((g) => ({ ...g, active: false })), 5, config);
+    expect(Number.isFinite(angle)).toBe(true);
+  });
+
+  it('makes every launch reach a paddle in a gate, straight away', () => {
+    const hitR = config.paddleRadius - config.ballRadius;
+    const expectedTicks = Math.ceil((hitR / config.launchSpeed) * TICK_RATE);
+    for (const n of [2, 4, 8]) {
+      for (let seed = 0; seed < 100; seed++) {
+        let state = { ...createGame(n, seed, config), respawnTicks: 1 };
+        // Run until a paddle hits the ball or the ball reaches the paddle radius.
+        let ticks = 0;
+        let hit = false;
+        while (!hit && Math.hypot(state.ball.x, state.ball.y) < hitR && ticks < 600) {
+          const result = step(state, [], config);
+          state = result.state;
+          hit = result.events.some((e) => e.type === 'hit');
+          ticks++;
+        }
+        expect(ticks).toBeLessThanOrEqual(expectedTicks + 2);
+        if (!hit) expect(gateAt(Math.atan2(state.ball.y, state.ball.x), state.gates, config)).not.toBe(-1);
+      }
+    }
   });
 
   it('launches in a direction that depends only on the seed', () => {

@@ -100,7 +100,7 @@ match_results (
 - **Paddles:** each paddle is an arc at radius 0.92.  It is centered at angle φ and can only slide within its own gate's angular span.  Input changes φ at a fixed angular speed.
 - **Ball:**
   - If it crosses the paddle radius within a paddle's arc, reflect its radial velocity component.  Add tangential "english" based on how far from the paddle's center it hit.
-  - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center with a random direction after a short delay.
+  - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center after a short delay and launches toward a random point inside a random active gate (a ball's width from its edges), so every launch reaches a paddle before it can touch a wall.
   - If it reaches the rim on a wall, it reflects, turned by a small random angle (`wallJitter`, ±0.09 rad by default) from the game's seeded PRNG.  A plain reflection keeps a ball that passes through the center on the same diameter forever, and with an even number of gates every wall faces another wall, so a launch into a wall could bounce out of everyone's reach for good.
   - Speed ramps up slightly after each paddle hit, up to a cap.
 - A match opens with a 3-second countdown before the first launch.

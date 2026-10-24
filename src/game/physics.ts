@@ -222,8 +222,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   if (state.respawnTicks > 0) {
     next.respawnTicks = state.respawnTicks - 1;
     if (next.respawnTicks === 0) {
-      const [r, seed] = nextRandom(state.seed);
-      const angle = r * 2 * Math.PI;
+      const [angle, seed] = launchAngle(gates, state.seed, config);
       next.seed = seed;
       next.rally = 0;
       next.ball = { x: 0, y: 0, vx: Math.cos(angle) * config.launchSpeed, vy: Math.sin(angle) * config.launchSpeed };
@@ -315,6 +314,28 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
   }
 
   return { ...state, ball: { x, y, vx, vy }, rally, seed };
+}
+
+/**
+ * Picks a launch direction: a random point inside a random active gate.
+ *
+ * Launching in any direction meant a ball sent into a wall travelled along a
+ * diameter, and with an even number of gates every wall faces another wall,
+ * so it could bounce out of everyone's reach for a long time.  Aiming at a
+ * gate means every launch reaches a paddle first.  The aim stays a ball's
+ * width inside the gate's edges so it can't clip the wall.
+ *
+ * @returns [angle, next seed]
+ */
+export function launchAngle(gates: GateState[], seed: number, config: PhysicsConfig): [number, number] {
+  const active = gates.flatMap((g, i) => (g.active ? [i] : []));
+  const [r1, seed1] = nextRandom(seed);
+  if (active.length === 0) return [r1 * 2 * Math.PI, seed1];
+
+  const gate = active[Math.min(active.length - 1, Math.floor(r1 * active.length))]!;
+  const [r2, seed2] = nextRandom(seed1);
+  const spread = Math.max(0, gateHalfWidth(gates.length, config) - config.ballRadius);
+  return [wrapAngle(gateCenter(gate, gates.length) + (r2 * 2 - 1) * spread), seed2];
 }
 
 /**
