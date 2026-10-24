@@ -1,11 +1,8 @@
-# Runs every check against a fresh local Supabase stack, then deploys the
-# frontend to Cloudflare Pages, but only from main and only if the checks
-# passed.  Pages' own automatic deploys are turned off (Branch control), so
-# this is the only way code reaches production.
-#
-# Migrations are not applied here: run `make db-push` before pushing code
-# that depends on them.  The deploy checks first, and stops if the hosted
-# database is missing any.
+# Runs every check against a fresh local Supabase stack.  Then, only from
+# main and only if the checks passed, applies new migrations to the hosted
+# database and deploys the frontend to Cloudflare Pages.  Pages' own automatic
+# deploys are turned off (Branch control), so this is the only way code
+# reaches production.
 
 name: CI
 
@@ -52,12 +49,17 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      # A dry run against the hosted project.  If it's missing a migration
-      # from this commit, the new frontend would call tables or functions that
-      # aren't there yet, so stop here with an error and a run summary.  Run
-      # `make db-push`, then re-run this job.
-      - name: Check the hosted database has every migration
-        run: make db-check
+      # Migrations go first, so the new frontend never calls tables or
+      # functions that aren't there yet.  If one fails, nothing is deployed.
+      # The old frontend stays live meanwhile (and if the deploy fails), so
+      # every migration has to work with it too.
+      #
+      # GitHub's runners have no IPv6 and the database's direct host is
+      # IPv6-only, so the CLI looks up the IPv4 pooler.  The token needs
+      # Database read-write (for the CLI's temporary login role) and
+      # Connection Pooling read.
+      - name: Apply new migrations to the hosted database
+        run: make db-push
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}

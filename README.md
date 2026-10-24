@@ -184,15 +184,20 @@ The backend goes to a hosted Supabase project.  The frontend is static files (`d
 
 ### 2. Migrations (every schema change)
 
+CI applies new migrations on every push to `main`, just before it deploys the frontend (see below).  Each migration has to work with the frontend that's already live, since that frontend keeps running until the deploy finishes, or longer if the deploy fails.  Add tables, columns and views freely.  To rename or drop something the frontend uses, ship code that no longer needs it first, and remove it in a later migration.
+
+To apply migrations by hand, for example if CI is down:
+
 ```sh
-make db-push   # applies new migrations to the linked project
+make db-diff   # lists the migrations db-push would apply
+make db-push   # applies them to the linked project
 ```
 
 ### 3. Frontend on Cloudflare Pages, deployed by CI
 
 Vite bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (the publishable key) and `VITE_TURNSTILE_SITE_KEY` into the bundle at **build time**, so they have to be present wherever the build runs.
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make db-check`, a dry run of `db push` against the hosted project.  If the hosted database is missing a migration from that commit, the job fails with the list of migrations and doesn't deploy: run `make db-push`, then re-run the job.  Otherwise it runs `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `npm run check` against a fresh local Supabase stack on every push and pull request.  On `main`, if the checks pass, it runs `make db-push` to apply new migrations to the hosted database, and then `make deploy-web` to build with the hosted values and upload `dist/` to Pages.  If a migration fails, nothing is deployed.  Runs on `main` queue rather than overlap, so two pushes never apply migrations at once.  Pages' own Git builds are turned off, so a commit that fails the checks never reaches production.
 
 One-time setup:
 
@@ -200,10 +205,10 @@ One-time setup:
 2. **Cloudflare API token.** Under My Profile → API Tokens, create a custom token with the **Account → Cloudflare Pages → Edit** permission.  Your **account ID** is on the Workers & Pages overview.
 3. **GitHub.** In the repository's Settings → Environments, create an environment named `production` and add:
    - secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
-   - secret `SUPABASE_ACCESS_TOKEN`, for the migration check: a Supabase access token (Account → Access Tokens).  A scoped token needs `database_write`, because even a dry run signs in through a temporary login role, and `database_pooling_config_read`.  GitHub's runners have no IPv6 and the database's direct host is IPv6-only, so the CLI has to look up the IPv4 pooler.  Without that permission it fails with "IPv6 is not supported on your current network";
+   - secret `SUPABASE_ACCESS_TOKEN`, for applying migrations: a scoped Supabase access token (Account → Access Tokens) with **Database: read-write** (`database_write`, which the CLI needs to create its temporary login role) and **Connection Pooling: read** (`database_pooling_config_read`).  GitHub's runners have no IPv6 and the database's direct host is IPv6-only, so the CLI has to look up the IPv4 pooler.  Without that permission it fails with "IPv6 is not supported on your current network".  The Migrations permission isn't needed: the CLI applies migrations over the database connection;
    - variables `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TURNSTILE_SITE_KEY` and `SUPABASE_PROJECT_REF`.
 
-The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).  It doesn't apply migrations: run `make db-push` before pushing code that needs them.  If you forget, `make db-check` stops the deploy.
+The workflow deploys to the Pages project named by `CF_PAGES_PROJECT` in the [`Makefile`](Makefile).
 
 **Deploying from your machine** works too, for example if CI is down:
 

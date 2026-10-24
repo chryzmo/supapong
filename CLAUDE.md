@@ -163,6 +163,7 @@ supabase/
   - **Integration** (`tests/integration/`): real app modules against the local stack, acting as different players via `actAs()`.  Test players get locally signed JWTs instead of anonymous sign-in, to stay under the auth rate limit.
 - New behavior gets a test in the lowest layer that can catch it.  `npm run check` must pass before committing.
 - All schema changes go in migrations, never ad hoc through the dashboard.
+- A migration must work with the frontend that's already deployed, because CI applies it before the new frontend goes out.  Adding things is fine.  To rename or drop something, first ship code that stops using it.
 - Keep dependencies minimal.  Ask before adding one.
 - Write small commits with clear messages.
 
@@ -190,4 +191,4 @@ npm run check              # everything above plus typecheck; the pre-commit hoo
 npm run gen:types          # regenerate src/database.types.ts after a schema change
 ```
 
-The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR, and deploys `main` to Cloudflare Pages only when it passes.  Migrations are still applied by hand with `make db-push`, before pushing code that needs them.  Before deploying, CI runs `make db-check` (a `db push --dry-run` against the hosted project), and fails without deploying if any migration is missing.  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.
+The `Makefile` wraps these, plus deploy targets (`make` lists them).  CI (`.github/workflows/ci.yml`) runs `npm run check` on every push and PR.  On `main`, when it passes, CI applies new migrations to the hosted database (`make db-push`) and then deploys to Cloudflare Pages.  If a migration fails, nothing is deployed.  Deploys read hosted values from `.env.production.local`, and `make build-prod` refuses a build that still points at the local stack.
