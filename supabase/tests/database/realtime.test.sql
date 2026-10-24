@@ -6,17 +6,19 @@
 -- then rolling back.  These tests do the same.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(20);
+select plan(26);
 
--- A hosts, B is seated, C is signed in but not in the room.
+-- A hosts, B and D are seated, C is signed in but not in the room.
 insert into auth.users (id, is_anonymous) values
   ('00000000-0000-0000-0000-00000000000a', true),
   ('00000000-0000-0000-0000-00000000000b', true),
-  ('00000000-0000-0000-0000-00000000000c', true);
+  ('00000000-0000-0000-0000-00000000000c', true),
+  ('00000000-0000-0000-0000-00000000000d', true);
 insert into public.profiles (id, display_name) values
   ('00000000-0000-0000-0000-00000000000a', 'A'),
   ('00000000-0000-0000-0000-00000000000b', 'B'),
-  ('00000000-0000-0000-0000-00000000000c', 'C');
+  ('00000000-0000-0000-0000-00000000000c', 'C'),
+  ('00000000-0000-0000-0000-00000000000d', 'D');
 
 create function pg_temp.login(p_uid uuid) returns void language sql as $$
   select set_config('request.jwt.claims', json_build_object('sub', p_uid, 'role', 'authenticated')::text, true);
@@ -50,12 +52,14 @@ set local role authenticated;
 select public.create_room('Realtime room', 4);
 select pg_temp.login('00000000-0000-0000-0000-00000000000b');
 select public.join_room(pg_temp.room());
+select pg_temp.login('00000000-0000-0000-0000-00000000000d');
+select public.join_room(pg_temp.room());
 reset role;
 
 -- One message of each kind on each topic, for the receive checks to find.
 insert into realtime.messages (topic, extension, event, payload)
 select 'room:' || pg_temp.room() || suffix, extension, 'seed', '{}'::jsonb
-from (values (''), (':input')) as topics (suffix), (values ('broadcast'), ('presence')) as kinds (extension)
+from (values (''), (':input'), (':input:00000000-0000-0000-0000-00000000000b'), (':input:00000000-0000-0000-0000-00000000000c')) as topics (suffix), (values ('broadcast'), ('presence')) as kinds (extension)
 union all
 select 'lobby', 'broadcast', 'seed', '{}'::jsonb;
 
@@ -80,17 +84,40 @@ select ok(not pg_temp.can_receive('presence'), 'an outsider receives no presence
 select ok(not pg_temp.can_send('broadcast'), 'an outsider cannot broadcast to the room');
 select ok(not pg_temp.can_send('presence'), 'an outsider cannot track presence');
 
--- room:{id}:input --------------------------------------------------------------
+-- room:{id}:input (retired) ------------------------------------------------------
+-- The shared input topic let a sender name any seat.  Nobody uses it now.
 select pg_temp.join('00000000-0000-0000-0000-00000000000a', 'room:' || pg_temp.room() || ':input');
-select ok(pg_temp.can_receive('broadcast'), 'the host receives inputs');
+select ok(not pg_temp.can_receive('broadcast'), 'the host cannot join the old shared input topic');
 
 select pg_temp.join('00000000-0000-0000-0000-00000000000b', 'room:' || pg_temp.room() || ':input');
-select ok(pg_temp.can_send('broadcast'), 'a seated guest can send inputs');
-select ok(pg_temp.can_receive('broadcast'), 'a seated guest can join the input channel');
+select ok(not pg_temp.can_send('broadcast'), 'a guest cannot send on the old shared input topic');
+select ok(not pg_temp.can_receive('broadcast'), 'a guest cannot join the old shared input topic');
 
-select pg_temp.join('00000000-0000-0000-0000-00000000000c', 'room:' || pg_temp.room() || ':input');
-select ok(not pg_temp.can_send('broadcast'), 'an outsider cannot send inputs');
-select ok(not pg_temp.can_receive('broadcast'), 'an outsider does not receive inputs');
+-- room:{id}:input:{player_id} -------------------------------------------------------
+-- B's own input topic.  Only B sends on it; only B and the host join it.
+create function pg_temp.input_topic(p_player text) returns text language sql as $$
+  select 'room:' || pg_temp.room() || ':input:00000000-0000-0000-0000-00000000000' || p_player;
+$$;
+grant execute on function pg_temp.input_topic(text) to authenticated;
+
+select pg_temp.join('00000000-0000-0000-0000-00000000000b', pg_temp.input_topic('b'));
+select ok(pg_temp.can_send('broadcast'), 'a guest can send on their own input topic');
+select ok(pg_temp.can_receive('broadcast'), 'a guest can join their own input topic');
+
+select pg_temp.join('00000000-0000-0000-0000-00000000000a', pg_temp.input_topic('b'));
+select ok(pg_temp.can_receive('broadcast'), 'the host receives a guest''s inputs');
+select ok(not pg_temp.can_send('broadcast'), 'the host cannot send as a guest');
+
+select pg_temp.join('00000000-0000-0000-0000-00000000000d', pg_temp.input_topic('b'));
+select ok(not pg_temp.can_send('broadcast'), 'another guest cannot send as that guest');
+select ok(not pg_temp.can_receive('broadcast'), 'another guest cannot join that guest''s input topic');
+
+select pg_temp.join('00000000-0000-0000-0000-00000000000c', pg_temp.input_topic('b'));
+select ok(not pg_temp.can_receive('broadcast'), 'an outsider cannot join a guest''s input topic');
+
+-- C isn't seated, so C's topic isn't anyone's, even for B.
+select pg_temp.join('00000000-0000-0000-0000-00000000000b', pg_temp.input_topic('c'));
+select ok(not pg_temp.can_send('broadcast'), 'nobody can send on the topic of a player without a seat');
 
 -- lobby ------------------------------------------------------------------------
 select pg_temp.join('00000000-0000-0000-0000-00000000000c', 'lobby');

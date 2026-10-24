@@ -32,6 +32,10 @@ The pattern is **trust, then verify**: the live match stays exactly as it is tod
 
 Each phase is useful on its own.  Phase 0 doesn't need Edge Functions at all, and gets most of the value.
 
+### Phase 0.5: inputs come from who they say (no Edge Functions)
+
+Done: migration `20261025010000_player_input_topics.sql`.  This one wasn't in the table above, but it was a real hole: on the shared `room:{id}:input` topic, an input's `seat` was the sender's word, so any seated player could move another's paddle or claim saves in their name.  Each player now sends on their own `room:{id}:input:{player_id}`, which only they can send on and only they and the host can join.  The host takes the seat from the topic.  The shared topic's policies are dropped.
+
 ### Phase 0: tighten what the database accepts (no Edge Functions)
 
 Done: migration `20261024200000_result_checks.sql`, and `ADOPT_BURST_SECONDS` in `host.ts`.  It also closed a hole the table above missed: a host could insert a room that was already `playing`, never seat anyone, and record any result for it.  The insert policy now requires a waiting, unstarted room.

@@ -19,7 +19,7 @@ So Edge Functions are only a side benefit here, through the anti-cheat work.  Th
 ## Design
 
 1. **Migration:**
-   - A read policy on `realtime.messages` for `room:{id}`: any authenticated user may receive broadcasts on a room whose status is `playing`.  There's no presence and no broadcast permission, and nothing on `room:{id}:input`.  The host-only broadcast policy stays.
+   - A read policy on `realtime.messages` for `room:{id}`: any authenticated user may receive broadcasts on a room whose status is `playing`.  There's no presence and no broadcast permission, and nothing on the players' input topics.  The host-only broadcast policy stays.
    - Show live rooms: either a `live_rooms` view, or a `status` column on `lobby_rooms` with the filter widened.  Both are additive.
    - GRANTs for anything new.
 2. **The lineup for late arrivals:** `start` is a one-time event, so someone who joins mid-match never gets the names, colors or goal limit.  The host rebroadcasts a small `lineup` event (the same payload as `start`) every 5 seconds, alongside snapshots.  It's under 1 KB, and adds 0.2 messages a second per viewer.

@@ -45,7 +45,7 @@ flowchart LR
   B -- "REST + RPC with the player's JWT" --> DB
   DB -- "Postgres Changes" --> RT
   RT -- "lobby: something changed" --> B
-  B <-- "private room channels<br/>room:{id}: Presence · state · events<br/>room:{id}:input: inputs" --> RT
+  B <-- "private room channels<br/>room:{id}: Presence · state · events<br/>room:{id}:input:{player}: inputs" --> RT
 ```
 
 What happens over one match:
@@ -92,7 +92,7 @@ sequenceDiagram
 | Lobby updates live | **Realtime Postgres Changes** | Room lists change rarely, so "tell me something changed and I'll refetch" is simple and cheap.  For inserts and updates, Realtime checks RLS before delivering the change.  Deletes always go through, but carry only the key.  The channel uses `postgres_changes_options: { wait: true }`, so the first refetch happens only once changes are flowing.  Without it, changes made just after subscribing could be missed. | [`src/lobby/api.ts`](src/lobby/api.ts) |
 | Who is actually connected | **Realtime Presence** | The database knows who holds a seat, not who is online.  Presence is tied to the socket, so a closed tab or a dropped network shows up as a leave, with no heartbeat code of ours. | [`src/room/session.ts`](src/room/session.ts) |
 | Game traffic: inputs, snapshots, room events | **Realtime Broadcast** | These only matter to people connected right now, so writing them to a table would be wasted work.  Broadcast sends them straight to the other sockets on the channel. | same, and [`src/game/`](src/game/) |
-| Only seated players in a room's channels, only the host sends game state | **Realtime Authorization** (private channels) | RLS policies on `realtime.messages` are checked when a client joins, against the same `room_players` and `rooms` tables as everything else.  Policies can tell broadcast from presence but not one event from another, so traffic is split by sender: on `room:{id}` only the host may broadcast, and inputs go on `room:{id}:input`.  The lobby channel is private too (read only), so the project refuses public channels altogether. | [`private_room_channels.sql`](supabase/migrations/20261024020243_private_room_channels.sql) |
+| Only seated players in a room's channels, only the host sends game state | **Realtime Authorization** (private channels) | RLS policies on `realtime.messages` are checked when a client joins, against the same `room_players` and `rooms` tables as everything else.  Policies can tell broadcast from presence but not one event from another, so traffic is split by sender: on `room:{id}` only the host may broadcast, and each player sends inputs on their own `room:{id}:input:{player_id}`, which only they and the host can join.  A message doesn't say who sent it, but the topic does, so a guest can't send inputs for someone else's seat.  The lobby channel is private too (read only), so the project refuses public channels altogether. | [`private_room_channels.sql`](supabase/migrations/20261024020243_private_room_channels.sql) |
 | Tidy up without a server | **pg_cron** | Abandoned rooms and throwaway anonymous users would otherwise pile up, since in-game cleanup depends on a host's browser.  A scheduled SQL function inside Postgres runs every 15 minutes: rooms older than 2 hours go (seats with them, results stay), and so do anonymous users idle for 7 days.  No Edge Function, no external scheduler. | [`cleanup_job.sql`](supabase/migrations/20261024022239_cleanup_job.sql) |
 | Schema you can review, reproduce and test | **Supabase CLI**: migrations, local stack, `supabase test db` (pgTAP), `gen types` | Every schema change is a migration file.  The local stack runs the same Postgres, Auth and Realtime as production.  RLS and RPCs have SQL tests, and `src/database.types.ts` is generated, so queries are type-checked. | [`supabase/`](supabase/) |
 
@@ -121,7 +121,7 @@ The design is host-authoritative.  Guests replay the host's physics between snap
 
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
-| `input` | guest → host, on `room:{id}:input` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
+| `input` | guest → host, on `room:{id}:input:{player_id}` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
 | `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, touch, seed, respawn, rally }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
 | `event` | host → all | rare | `start` (gate order, bots marked, goal limit), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
@@ -154,7 +154,6 @@ The tests don't cover the DOM screens themselves.  Those are checked by hand in 
 These are deliberate trade-offs for a prototype.  Each one is noted where it lives in the code.
 
 - **The host is trusted.** It runs the physics, so it could cheat, and if it leaves, the match ends.  The database only checks that a result is plausible: points only for players seated at the start, no more points than the goal limit, and not sooner than the match could have lasted.  Guests confirm the scores they were shown, and only results most players confirmed count toward the leaderboard, so a host who records different scores from the ones it showed is left out.  A host can still show everyone the same fake match.  So can two accounts owned by one person, and a match whose guests left before the end can't be ranked at all.  `plans/anti-cheat.md` has the next steps.
-- **Seated players can spoof each other's inputs.** Room channels are private: outsiders can't join, and only the host can broadcast state and events.  But a Broadcast message doesn't carry its sender, so a guest's `input` claims a seat number the host can't verify.  A seated player could move someone else's paddle, or claim saves in their name.
 - **Channel access is checked at join.** Realtime caches it for the connection, so a player whose seat is removed keeps receiving room messages until their socket rejoins.
 - **Guests decide their own saves.** A guest's claim is checked for plausibility, not proof, so a modified client could claim saves it didn't make.  That's the anti-cheat non-goal again.
 - **A late save looks like a jump to everyone else.** When the host accepts a claim, the host and other guests see the ball, already past the paddle or gone, come back on its bounce.  The guest who made the save sees it as it happened.

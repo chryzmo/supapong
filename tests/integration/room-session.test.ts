@@ -284,7 +284,7 @@ describe('private channels', () => {
   it('keeps out players who are not seated', async () => {
     const { room } = await setup(1);
     const intruder = await createPlayer('Intruder');
-    for (const topic of [`room:${room.id}`, `room:${room.id}:input`]) {
+    for (const topic of [`room:${room.id}`, `room:${room.id}:input`, `room:${room.id}:input:${intruder.id}`]) {
       const channel = intruder.client.channel(topic, { config: { private: true } });
       const status = await new Promise<string>((resolve) =>
         channel.subscribe((s) => (s === 'SUBSCRIBED' || s === 'CHANNEL_ERROR') && resolve(s)),
@@ -301,12 +301,35 @@ describe('private channels', () => {
     expect(guests[1]!.events).toEqual([]);
   });
 
-  it("delivers a guest's inputs to the host", async () => {
+  it("delivers a guest's inputs to the host once the match starts", async () => {
     const { host, guests } = await setup(1);
     const inputs: InputMessage[] = [];
+    await host.session.startMatch();
     host.session.listen({ input: (message) => inputs.push(message) });
     guests[0]!.session.sendInput({ seat: 1, dir: 1 });
     await waitFor(() => inputs.length > 0, 'the input');
     expect(inputs).toEqual([{ seat: 1, dir: 1 }]);
+  });
+
+  it("credits an input to the seat of the guest who sent it, whatever seat it names", async () => {
+    const { host, guests } = await setup(2);
+    const inputs: InputMessage[] = [];
+    await host.session.startMatch();
+    host.session.listen({ input: (message) => inputs.push(message) });
+    // Guest 2 pretends to be guest 1.
+    guests[1]!.session.sendInput({ seat: guests[0]!.session.room.seat, dir: -1 });
+    await waitFor(() => inputs.length > 0, 'the input');
+    expect(inputs).toEqual([{ seat: guests[1]!.session.room.seat, dir: -1 }]);
+  });
+
+  it("keeps a guest off another guest's input topic", async () => {
+    const { room, guests } = await setup(2);
+    const topic = `room:${room.id}:input:${guests[0]!.player.id}`;
+    const channel = guests[1]!.player.client.channel(topic, { config: { private: true } });
+    const status = await new Promise<string>((resolve) =>
+      channel.subscribe((s) => (s === 'SUBSCRIBED' || s === 'CHANNEL_ERROR') && resolve(s)),
+    );
+    expect(status).toBe('CHANNEL_ERROR');
+    await guests[1]!.player.client.removeChannel(channel);
   });
 });
