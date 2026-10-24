@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Runs every check: typecheck, unit tests, database tests, integration tests.
 # The pre-commit hook runs this.  Run it yourself with `npm run check`.
+# The last run's output is saved to .git/last-check.log.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Keep a copy of the output, so a failure in the pre-commit hook can be read afterwards.
+exec > >(tee "$(git rev-parse --git-dir)/last-check.log") 2>&1
 
 # Git hooks started from an IDE may not have your shell profile, so point the
 # Supabase CLI at Podman if there's no Docker and DOCKER_HOST isn't set.
