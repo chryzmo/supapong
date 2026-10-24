@@ -5,6 +5,10 @@ export const DISPLAY_NAME_MAX = 24;
 export const ROOM_NAME_MAX = 32;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
+/** Goals in total that end a match.  The database accepts 1 to 50; the lobby offers these. */
+export const GOAL_LIMIT_CHOICES = [5, 10, 15, 20, 25] as const;
+export const DEFAULT_GOAL_LIMIT = 10;
+const GOAL_LIMIT_MAX = 50;
 
 export interface Player {
   id: string;
@@ -19,6 +23,7 @@ export interface LobbyRoom {
   hostName: string;
   playerCount: number;
   maxPlayers: number;
+  goalLimit: number;
 }
 
 /** A room the current player is seated in. */
@@ -27,6 +32,7 @@ export interface SeatedRoom {
   name: string;
   hostId: string;
   maxPlayers: number;
+  goalLimit: number;
   seat: number;
 }
 
@@ -94,11 +100,22 @@ export interface Gate {
   seat: number;
   playerId: string;
   displayName: string;
+  /** A computer paddle, run by the host.  Bots hold no seat in the database and aren't saved in results. */
+  bot?: true;
+}
+
+/** What the host tells everyone when the match starts. */
+export interface MatchStart {
+  gates: Gate[];
+  /** Goals in total that end the match, from the room. */
+  goalLimit: number;
+  /** Host only, never sent: how well the bots play, 0 to 1 (see botInput). */
+  botSkill?: number;
 }
 
 /** Broadcast `event` messages, sent by the host. */
 export type RoomEvent =
-  | { type: 'start'; gates: Gate[] }
+  | ({ type: 'start' } & MatchStart)
   | { type: 'closed' }
   | { type: 'removed'; playerId: string }
   | { type: 'goal'; gate: number }
@@ -121,6 +138,8 @@ export interface StateMessage {
   paddles: number[];
   active: boolean[];
   scores: number[];
+  /** Goals scored so far; the match ends at the room's goal limit. */
+  goals: number;
   /** Ticks until the ball launches; 0 while it's in play. */
   respawn: number;
   rally: number;
@@ -170,13 +189,16 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       if (raw.length < MIN_PLAYERS || raw.length > MAX_PLAYERS) return null;
       const gates: Gate[] = [];
       for (const item of raw) {
-        const gate = parseRosterEntry(item);
-        if (!gate) return null;
-        gates.push(gate);
+        const entry = parseRosterEntry(item);
+        if (!entry) return null;
+        gates.push(isRecord(item) && item.bot === true ? { ...entry, bot: true } : entry);
       }
       if (new Set(gates.map((g) => g.seat)).size !== gates.length) return null;
       if (new Set(gates.map((g) => g.playerId)).size !== gates.length) return null;
-      return { type: 'start', gates };
+      // A host still running the previous version sends no limit, and plays to 10.
+      const goalLimit = value.goalLimit ?? DEFAULT_GOAL_LIMIT;
+      if (!isCount(goalLimit) || goalLimit < 1 || goalLimit > GOAL_LIMIT_MAX) return null;
+      return { type: 'start', gates, goalLimit };
     }
     case 'closed':
       return { type: 'closed' };
@@ -203,8 +225,8 @@ export function parseInputMessage(value: unknown): InputMessage | null {
 
 export function parseStateMessage(value: unknown): StateMessage | null {
   if (!isRecord(value)) return null;
-  const { tick, ball, paddles, active, scores, respawn, rally } = value;
-  if (!isCount(tick) || !isCount(respawn) || !isCount(rally)) return null;
+  const { tick, ball, paddles, active, scores, goals, respawn, rally } = value;
+  if (!isCount(tick) || !isCount(goals) || !isCount(respawn) || !isCount(rally)) return null;
   if (!isNumberArray(ball, 4)) return null;
   if (!isNumberArray(paddles) || paddles.length < MIN_PLAYERS || paddles.length > MAX_PLAYERS) return null;
   const n = paddles.length;
@@ -218,6 +240,7 @@ export function parseStateMessage(value: unknown): StateMessage | null {
     paddles,
     active: active.filter((a): a is boolean => typeof a === 'boolean'),
     scores: scores.filter(isCount),
+    goals,
     respawn,
     rally,
   };

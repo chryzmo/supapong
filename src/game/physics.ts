@@ -40,24 +40,25 @@ export interface PhysicsConfig {
   /** Seconds the ball waits at the center before (re)launching. */
   respawnDelay: number;
   matchDuration: number;
-  scoreCap: number;
+  /** The match ends once this many goals have been scored in total. */
+  goalLimit: number;
 }
 
 export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
-  gateFraction: 0.6,
+  gateFraction: 0.8,
   paddleRadius: 0.92,
-  paddleFraction: 0.3,
+  paddleFraction: 0.22,
   paddleSpeed: 1.4,
   ballRadius: 0.022,
-  launchSpeed: 0.55,
-  speedUpPerHit: 1.05,
-  maxSpeed: 1.5,
+  launchSpeed: 0.7,
+  speedUpPerHit: 1.08,
+  maxSpeed: 3,
   english: 0.6,
   minRadialShare: 0.4,
   wallJitter: 0.09,
   respawnDelay: 1.2,
   matchDuration: 120,
-  scoreCap: 10,
+  goalLimit: 10,
 };
 
 export const TICK_RATE = 60;
@@ -83,6 +84,8 @@ export interface GameState {
   gates: GateState[];
   /** Points per gate. */
   scores: number[];
+  /** Goals scored so far.  Not derivable from scores: a goal gives a point to every other active gate. */
+  goals: number;
   /** Ticks until the ball launches.  While > 0 the ball sits at the center. */
   respawnTicks: number;
   /** Consecutive paddle hits since the last launch. */
@@ -171,6 +174,7 @@ export function createGame(gateCount: number, seed: number, config: PhysicsConfi
     ball: { x: 0, y: 0, vx: 0, vy: 0 },
     gates: Array.from({ length: gateCount }, (_, i) => ({ active: true, paddle: gateCenter(i, gateCount) })),
     scores: Array.from({ length: gateCount }, () => 0),
+    goals: 0,
     respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
     rally: 0,
     seed: seed >>> 0,
@@ -183,7 +187,7 @@ export function setGateActive(state: GameState, gate: number, active: boolean): 
 }
 
 export function isOver(state: GameState, config: PhysicsConfig): boolean {
-  return state.tick >= config.matchDuration * TICK_RATE || state.scores.some((s) => s >= config.scoreCap);
+  return state.tick >= config.matchDuration * TICK_RATE || state.goals >= config.goalLimit;
 }
 
 export function ballSpeed(ball: Ball): number {
@@ -286,6 +290,7 @@ function moveBall(state: GameState, config: PhysicsConfig, events: PhysicsEvent[
           ...state,
           ball: { x: 0, y: 0, vx: 0, vy: 0 },
           scores: state.scores.map((s, i) => (i !== goal && state.gates[i]!.active ? s + 1 : s)),
+          goals: state.goals + 1,
           respawnTicks: Math.round(config.respawnDelay * TICK_RATE),
           rally: 0,
           seed,

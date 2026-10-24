@@ -1,7 +1,7 @@
 -- Lobby schema, RLS and RPC tests.  Run with `npx supabase test db`.
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(46);
+select plan(51);
 
 -- Five players: A hosts, B-E join.
 insert into auth.users (id, is_anonymous) values
@@ -132,6 +132,16 @@ select throws_ok($$ select public.create_room('Crowd', 9) $$, '23514', null, 'ro
 select throws_ok($$ select public.create_room('   ', 4) $$, '23514', null, 'room names cannot be blank');
 select throws_ok($$ select public.create_room(repeat('x', 33), 4) $$, '23514', null, 'room names are at most 32 characters');
 select lives_ok($$ select public.create_room(repeat('x', 32), 4) $$, '32-character room names are allowed');
+
+-- Goal limit -----------------------------------------------------------------------
+select is((select goal_limit from public.rooms where name = repeat('x', 32)), 10, 'the goal limit defaults to 10');
+select public.create_room('Long match', 2, 25);
+select is((select goal_limit from public.rooms where name = 'Long match'), 25, 'create_room sets the goal limit');
+select is(
+  (select goal_limit from public.lobby_rooms where name = 'Long match'),
+  25, 'the lobby shows the goal limit');
+select throws_ok($$ select public.create_room('No goals', 2, 0) $$, '23514', null, 'a match needs at least one goal');
+select throws_ok($$ select public.create_room('Marathon', 2, 51) $$, '23514', null, 'the goal limit is at most 50');
 
 -- Missing rooms ------------------------------------------------------------------
 select throws_ok(

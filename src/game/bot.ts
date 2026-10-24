@@ -1,4 +1,5 @@
-// Computer-controlled paddles for the sandbox.  Pure, like physics.ts.
+// Computer-controlled paddles, for the sandbox and for bots in a match (run by
+// the host).  Pure, like physics.ts.
 import {
   angleDiff,
   exitTime,
@@ -8,6 +9,13 @@ import {
   type GameState,
   type PhysicsConfig,
 } from './physics';
+
+/** The skill levels a host can pick for the bots in a match. */
+export const BOT_LEVELS = [
+  { label: 'Easy', skill: 0.3 },
+  { label: 'Normal', skill: 0.6 },
+  { label: 'Hard', skill: 0.9 },
+] as const;
 
 /**
  * Picks a direction for `gate`'s paddle.

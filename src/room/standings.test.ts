@@ -49,4 +49,14 @@ describe('scoresByPlayer', () => {
   it('keys points by player id, including players who left', () => {
     expect(scoresByPlayer(result([3, 1], [true, false]))).toEqual({ ada: 3, bob: 1 });
   });
+
+  it('leaves bots out', () => {
+    const withBot: MatchResult = { gates: [gates[0]!, { ...gates[1]!, bot: true }, gates[2]!], scores: [3, 5, 1], active: [true, true, true] };
+    expect(scoresByPlayer(withBot)).toEqual({ ada: 3, cy: 1 });
+    expect(standings(withBot).map((s) => [s.displayName, s.bot])).toEqual([
+      ['Bob', true],
+      ['Ada', false],
+      ['Cy', false],
+    ]);
+  });
 });

@@ -29,7 +29,7 @@ describe('encodeState / decodeState', () => {
   });
 
   it('stays small', () => {
-    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10) }));
+    const json = JSON.stringify(encodeState({ ...playing(10).at(-1)!, gates: Array(8).fill({ active: true, paddle: -2.123456789 }), scores: Array(8).fill(10), goals: 25 }));
     expect(json.length).toBeLessThan(260);
   });
 });

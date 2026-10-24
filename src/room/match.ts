@@ -7,7 +7,7 @@ import { startFrames } from '../game/loop';
 import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
 import { SEAT_COLORS, draw, type RenderView } from '../game/render';
 import { onMobileBrowser, touchControls } from '../game/touch';
-import type { Gate } from '../types';
+import type { MatchStart } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
 import { scoresByPlayer, type MatchResult } from './standings';
@@ -16,9 +16,9 @@ import { exitRoom, leaveButton, type RoomActions } from './waiting';
 const FLASH_MS = 600;
 /** How long "Match over" stays on the board before the results screen. */
 const RESULTS_DELAY_MS = 1500;
-const config = DEFAULT_CONFIG;
-
-export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomActions): View {
+export function matchScreen(session: RoomSession, start: MatchStart, actions: RoomActions): View {
+  const { gates } = start;
+  const config = { ...DEFAULT_CONFIG, goalLimit: start.goalLimit };
   const { room, player, isHost } = session;
   const myGate = gates.findIndex((gate) => gate.playerId === player.id);
   const labels = gates.map((gate, i) => ({ name: gate.displayName, color: SEAT_COLORS[i % SEAT_COLORS.length]! }));
@@ -44,7 +44,7 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
     resultsTimer = setTimeout(() => actions.ended(result), RESULTS_DELAY_MS);
   };
 
-  const host = isHost ? new HostGame(session, gates, myGate, { config, onGoal, onEnd }) : undefined;
+  const host = isHost ? new HostGame(session, gates, myGate, { config, onGoal, onEnd, ...(start.botSkill !== undefined ? { botSkill: start.botSkill } : {}) }) : undefined;
   const client = isHost
     ? undefined
     : new ClientGame(gates, myGate, (dir) => session.sendInput({ seat: room.seat, dir }), { config });
@@ -73,7 +73,7 @@ export function matchScreen(session: RoomSession, gates: Gate[], actions: RoomAc
     draw(canvas, state, config, renderView(state, now));
     const secondsLeft = Math.max(0, config.matchDuration - state.tick / TICK_RATE);
     const time = `${Math.floor(secondsLeft / 60)}:${String(Math.floor(secondsLeft % 60)).padStart(2, '0')}`;
-    hud.textContent = finalScores ? 'Final score' : `${time} left · first to ${config.scoreCap} · rally ${state.rally}`;
+    hud.textContent = finalScores ? 'Final score' : `${time} left · ${state.goals}/${config.goalLimit} goals · rally ${state.rally}`;
   });
 
   function renderView(state: GameState, now: number): RenderView {

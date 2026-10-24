@@ -119,11 +119,13 @@ h2 {
   white-space: nowrap;
 }
 
+/* Room name on its own row, then size and goal limit side by side. */
 form.create {
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr 1fr;
   align-items: end;
 }
 
+form.create label:first-child,
 form.create button {
   grid-column: 1 / -1;
 }

@@ -9,7 +9,7 @@ import { scoresByPlayer, type MatchResult } from './room/standings';
 import { RoomSession } from './room/session';
 import { waitingScreen, type RoomActions } from './room/waiting';
 import { statsScreen } from './stats/stats';
-import { DISPLAY_NAME_MAX, validateDisplayName, type Gate, type Player, type SeatedRoom } from './types';
+import { DISPLAY_NAME_MAX, validateDisplayName, type MatchStart, type Player, type SeatedRoom } from './types';
 import { errorMessage, h, type View } from './ui';
 
 type Screen =
@@ -17,7 +17,7 @@ type Screen =
   | { name: 'pick-name'; current?: Player }
   | { name: 'lobby'; player: Player; notice?: string }
   | { name: 'room'; player: Player; room: SeatedRoom }
-  | { name: 'match'; player: Player; gates: Gate[] }
+  | { name: 'match'; player: Player; start: MatchStart }
   | { name: 'results'; player: Player; result: MatchResult }
   | { name: 'stats'; player: Player }
   | { name: 'sandbox'; back: () => void };
@@ -44,7 +44,7 @@ function show(screen: Screen): void {
 
 function roomActions(player: Player): RoomActions {
   return {
-    started: (gates) => show({ name: 'match', player, gates }),
+    started: (start) => show({ name: 'match', player, start }),
     ended: (result) => show({ name: 'results', player, result }),
     left: (notice) => show({ name: 'lobby', player, notice }),
   };
@@ -92,7 +92,7 @@ function render(screen: Screen): View {
     }
     case 'match': {
       if (!session) throw new Error('No room session for the match.');
-      return matchScreen(session, screen.gates, roomActions(screen.player));
+      return matchScreen(session, screen.start, roomActions(screen.player));
     }
     case 'results': {
       const { player, result } = screen;

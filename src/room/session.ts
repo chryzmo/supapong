@@ -28,6 +28,7 @@ import {
   parseStateMessage,
   type Gate,
   type InputMessage,
+  type MatchStart,
   type Player,
   type RoomEvent,
   type RosterEntry,
@@ -35,6 +36,7 @@ import {
   type StateMessage,
 } from '../types';
 import { deleteRoom, fetchSeatIds, finishMatch, hasSeat, removePlayer, setRoomStatus } from './api';
+import { lineup } from './lineup';
 import { AbsenceTracker, rosterFromPresence, staleSeats } from './presence';
 
 /** How long a player can be missing from Presence before losing their seat. Covers a page reload. */
@@ -172,21 +174,23 @@ export class RoomSession {
 
   /**
    * Host only.  Locks the room (no more joins), drops seats whose players
-   * aren't connected, and tells everyone the gate order.
+   * aren't connected, and tells everyone the gate order, bots included.
+   * Bots only fill out a match: it still needs MIN_PLAYERS connected players.
    */
-  async startMatch(): Promise<Gate[]> {
+  async startMatch(options: { bots?: number; botSkill?: number } = {}): Promise<MatchStart> {
     if (!this.isHost) throw new Error('Only the host can start the match.');
-    const gates: Gate[] = this.roster.map(({ seat, playerId, displayName }) => ({ seat, playerId, displayName }));
-    if (gates.length < MIN_PLAYERS) throw new Error(`Need at least ${MIN_PLAYERS} connected players.`);
+    const humans: Gate[] = this.roster.map(({ seat, playerId, displayName }) => ({ seat, playerId, displayName }));
+    if (humans.length < MIN_PLAYERS) throw new Error(`Need at least ${MIN_PLAYERS} connected players.`);
+    const gates = lineup(humans, options.bots ?? 0, this.room.maxPlayers);
 
     await setRoomStatus(this.client, this.room.id, 'playing');
-    const inMatch = new Set(gates.map((gate) => gate.playerId));
+    const inMatch = new Set(humans.map((gate) => gate.playerId));
     for (const playerId of await fetchSeatIds(this.client, this.room.id)) {
       if (!inMatch.has(playerId)) await removePlayer(this.client, this.room.id, playerId);
     }
     this.phase = 'playing';
-    await this.send({ type: 'start', gates });
-    return gates;
+    await this.send({ type: 'start', gates, goalLimit: this.room.goalLimit });
+    return { gates, goalLimit: this.room.goalLimit, ...(options.botSkill !== undefined ? { botSkill: options.botSkill } : {}) };
   }
 
   /**

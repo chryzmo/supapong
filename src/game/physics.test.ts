@@ -267,6 +267,7 @@ describe('the rim', () => {
     const { state, events } = run(radialShot(4, angle), [], 300, (e) => e.type === 'goal');
     expect(events.at(-1)).toEqual({ type: 'goal', gate: 0 });
     expect(state.scores).toEqual([0, 1, 1, 1]);
+    expect(state.goals).toBe(1);
     expect(state.ball).toEqual({ x: 0, y: 0, vx: 0, vy: 0 });
     expect(state.respawnTicks).toBe(Math.round(config.respawnDelay * TICK_RATE));
   });
@@ -343,11 +344,22 @@ describe('the rim', () => {
 });
 
 describe('match end', () => {
-  it('ends at the time limit or the score cap', () => {
+  it('ends at the time limit or the goal limit', () => {
     const state = createGame(3, 1, config);
     expect(isOver(state, config)).toBe(false);
     expect(isOver({ ...state, tick: config.matchDuration * TICK_RATE }, config)).toBe(true);
-    expect(isOver({ ...state, scores: [0, config.scoreCap, 3] }, config)).toBe(true);
+    expect(isOver({ ...state, goals: config.goalLimit }, config)).toBe(true);
+  });
+
+  it('counts goals in total, not one player reaching the limit', () => {
+    const limit = { ...config, goalLimit: 10 };
+    const twoPlayers = createGame(2, 1, limit);
+    expect(isOver({ ...twoPlayers, scores: [9, 1], goals: 10 }, limit)).toBe(true);
+    expect(isOver({ ...twoPlayers, scores: [8, 1], goals: 9 }, limit)).toBe(false);
+    // With 4 players a goal is worth 3 points in total, so points alone
+    // would end it far too early.
+    const fourPlayers = createGame(4, 1, limit);
+    expect(isOver({ ...fourPlayers, scores: [3, 3, 3, 3], goals: 4 }, limit)).toBe(false);
   });
 });
 
@@ -355,7 +367,7 @@ describe('invariants', () => {
   it('keeps the ball on the board and is fully deterministic', () => {
     // A long game with pseudo-random inputs, played twice.
     const play = () => {
-      let state = createGame(5, 99, { ...config, matchDuration: 1e9, scoreCap: 1e9 });
+      let state = createGame(5, 99, { ...config, matchDuration: 1e9, goalLimit: 1e9 });
       let inputSeed = 5;
       let maxR = 0;
       for (let t = 0; t < 20_000; t++) {

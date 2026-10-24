@@ -1,4 +1,13 @@
-import { MAX_PLAYERS, MIN_PLAYERS, ROOM_NAME_MAX, validateRoomName, type LobbyRoom, type Player } from '../types';
+import {
+  DEFAULT_GOAL_LIMIT,
+  GOAL_LIMIT_CHOICES,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  ROOM_NAME_MAX,
+  validateRoomName,
+  type LobbyRoom,
+  type Player,
+} from '../types';
 import { errorMessage, h, type View } from '../ui';
 import { createRoom, fetchLobbyRooms, joinRoom, subscribeLobby } from './api';
 
@@ -41,12 +50,17 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   for (let n = MIN_PLAYERS; n <= MAX_PLAYERS; n++) {
     sizeSelect.append(h('option', { value: String(n), selected: n === 4 }, `${n} players`));
   }
+  const goalsSelect = h('select', { name: 'goal_limit' });
+  for (const n of GOAL_LIMIT_CHOICES) {
+    goalsSelect.append(h('option', { value: String(n), selected: n === DEFAULT_GOAL_LIMIT }, `${n} goals`));
+  }
   const createButton = h('button', { type: 'submit' }, 'Create room');
   const createForm = h(
     'form',
     { className: 'create' },
     h('label', {}, 'Room name', nameInput),
     h('label', {}, 'Size', sizeSelect),
+    h('label', {}, 'Match ends after', goalsSelect),
     createButton,
   );
   createForm.addEventListener('submit', (event) => {
@@ -59,7 +73,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     void run(async () => {
       createButton.disabled = true;
       try {
-        const roomId = await createRoom(result.value, Number(sizeSelect.value));
+        const roomId = await createRoom(result.value, Number(sizeSelect.value), Number(goalsSelect.value));
         actions.enterRoom(roomId, 0);
       } finally {
         createButton.disabled = false;
@@ -90,7 +104,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
             'div',
             { className: 'room-info' },
             h('strong', {}, room.name),
-            h('span', { className: 'muted' }, `${room.hostName} · ${room.playerCount}/${room.maxPlayers}`),
+            h('span', { className: 'muted' }, `${room.hostName} · ${room.playerCount}/${room.maxPlayers} · ${room.goalLimit} goals`),
           ),
           join,
         );

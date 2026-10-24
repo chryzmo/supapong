@@ -75,7 +75,21 @@ describe('parseRoomEvent', () => {
   });
 
   it('accepts start, closed and removed', () => {
-    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15 });
+  });
+
+  it('keeps the bot flag on bot gates', () => {
+    const withBot = [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1', bot: true }];
+    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10 });
+    expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10 })).toEqual({
+      type: 'start',
+      gates: [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1' }],
+      goalLimit: 10,
+    });
+  });
+
+  it('plays to 10 when a start has no goal limit (a host on the previous version)', () => {
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10 });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
     expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
   });
@@ -83,6 +97,9 @@ describe('parseRoomEvent', () => {
   it.each([
     ['an unknown type', { type: 'explode' }],
     ['a start with one gate', { type: 'start', gates: gates.slice(0, 1) }],
+    ['a start with no goals to play', { type: 'start', gates, goalLimit: 0 }],
+    ['a start with too many goals', { type: 'start', gates, goalLimit: 51 }],
+    ['a start with a fractional goal limit', { type: 'start', gates, goalLimit: 2.5 }],
     ['a start with nine gates', { type: 'start', gates: Array.from({ length: 9 }, (_, i) => ({ seat: i % 8, playerId: `p${i}`, displayName: 'P' })) }],
     ['a start with a bad gate', { type: 'start', gates: [...gates, { seat: 'x' }] }],
     ['a start with duplicate seats', { type: 'start', gates: [gates[0], { ...gates[1], seat: 0 }] }],
@@ -118,6 +135,7 @@ describe('parseStateMessage', () => {
     paddles: [0, 2.09, -2.09],
     active: [true, true, false],
     scores: [1, 0, 2],
+    goals: 3,
     respawn: 0,
     rally: 4,
   };
@@ -135,6 +153,7 @@ describe('parseStateMessage', () => {
     ['a negative score', { ...state, scores: [1, -1, 2] }],
     ['a fractional tick', { ...state, tick: 1.5 }],
     ['a missing respawn', { ...state, respawn: undefined }],
+    ['missing goals', { ...state, goals: undefined }],
   ])('rejects %s', (_label, value) => {
     expect(parseStateMessage(value)).toBeNull();
   });

@@ -97,14 +97,14 @@ isOneToOne: false
                   ]
                 },"rooms": {
                   Row: {
-                    "created_at": string,"host_id": string,"id": string,"max_players": number,"name": string,"status": string
+                    "created_at": string,"goal_limit": number,"host_id": string,"id": string,"max_players": number,"name": string,"status": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"host_id": string,"id"?: string,"max_players": number,"name": string,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number,"host_id": string,"id"?: string,"max_players": number,"name": string,"status"?: string
                   }
                   Update: {
-                    "created_at"?: string,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"status"?: string
+                    "created_at"?: string,"goal_limit"?: number,"host_id"?: string,"id"?: string,"max_players"?: number,"name"?: string,"status"?: string
                   }
                   Relationships: [
                     {
@@ -128,7 +128,7 @@ isOneToOne: false
                   ]
                 },"lobby_rooms": {
                   Row: {
-                    "created_at": string,"host_id": string,"host_name": string,"id": string,"max_players": number,"name": string,"player_count": number | null
+                    "created_at": string,"goal_limit": number,"host_id": string,"host_name": string,"id": string,"max_players": number,"name": string,"player_count": number | null
                   }
                   ComputedFields: never
                   Relationships: [
@@ -155,7 +155,7 @@ isOneToOne: false
 { Args: Record<PropertyKey, never>; Returns: Json
                            },
 "create_room":
-{ Args: { "p_max_players": number,"p_name": string }; Returns: string
+{ Args: { "p_goal_limit"?: number,"p_max_players": number,"p_name": string }; Returns: string
                            },
 "finish_match":
 { Args: { "p_room_id": string,"p_scores": Json }; Returns: string

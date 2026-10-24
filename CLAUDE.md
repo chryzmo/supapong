@@ -45,6 +45,7 @@ rooms (
   name text not null,
   host_id uuid not null references profiles,
   max_players int not null check (max_players between 2 and 8),
+  goal_limit int not null default 10 check (goal_limit between 1 and 50),  -- goals in total that end the match
   status text not null default 'waiting' check (status in ('waiting','playing','finished')),
   created_at timestamptz default now()
 )
@@ -76,7 +77,7 @@ match_results (
 
 - `profiles`: anyone authenticated can read.  You can only insert or update your own row.
 - `rooms`: anyone authenticated can read.  Insert requires `host_id = auth.uid()`.  The host can delete their room (closing it).  There is no update policy, because RLS can't limit an update to one column.  Status changes go through the `set_room_status(room_id, status)` RPC, which checks the caller is the host and the transition moves forward.
-- `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players)`, which creates the room and seats the host in one transaction.
+- `room_players`: anyone authenticated can read.  You can delete your own row (leaving), and the room's host can delete any row in their room (removing a disconnected player).  Inserts go only through `join_room`, or `create_room(name, max_players, goal_limit = 10)`, which creates the room and seats the host in one transaction.
 - `match_results`: anyone authenticated can read.  No direct inserts: results are written only by the `finish_match(room_id, scores)` RPC (`security definer`), which checks the caller is the host and the room is `playing`, validates the scores, inserts the result (with the room name and players' names from `profiles`) and sets the room to `finished`, all in one transaction.
 
 ### Realtime
@@ -86,8 +87,8 @@ match_results (
 - **Room channels** `room:{id}` and `room:{id}:input`.  Only seated players can join either.  Policies can't tell broadcast events apart, so traffic is split by sender: only the host may broadcast on `room:{id}`, and inputs go on `room:{id}:input`.
   - **Presence** tracks who is actually connected, keyed by player id, with payload `{ playerId, displayName, seat }`.  When a player has been missing from Presence for a grace period (8 s, so a reload doesn't cost the seat), the host deletes their `room_players` row and broadcasts `removed`.  The host also polls the room's seats every few seconds to catch seats whose player never connected.  If the host is missing for the grace period, the other players leave.
   - **Broadcast `input`** (client → all, on `room:{id}:input`): `{ seat, dir: -1 | 0 | 1 }`.  Send it only when the value changes.  Only the host acts on it.
-  - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
-  - **Broadcast `event`** (host → all): `start` (carries the gate order: `{ seat, playerId, displayName }[]`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
+  - **Broadcast `state`** (host → all, 20 Hz, every 3rd tick): `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, respawn, rally }`, arrays in gate order, numbers rounded to 4 decimals (under 260 bytes at 8 players).
+  - **Broadcast `event`** (host → all): `start` (carries the gate order, `gates: { seat, playerId, displayName, bot? }[]`, and the room's `goalLimit`), `closed` (the host left), `removed` (a player lost their seat), `goal` (`{ gate }`, for the flash) and `end` (`{ scores }`).
 
 ### Cleanup
 
@@ -98,21 +99,22 @@ match_results (
 - The room creator's browser runs physics at a fixed 60 Hz and broadcasts snapshots.  Its timer runs in a Web Worker, because browsers throttle page timers in background tabs and a hidden host tab would otherwise freeze the match.  If it falls more than 15 ticks behind, it skips ahead.
 - The other clients render 100 ms in the past, interpolating between buffered snapshots.  They only predict their own paddle locally: it moves the moment a key is pressed, and eases toward the host's position once the player stops.
 - If the host disconnects, the match ends.  There is no migration in this version.
+- **Bots:** in the waiting room the host can add bots (up to the room's free seats) and pick their skill: Easy, Normal or Hard (`BOT_LEVELS` in `bot.ts`, 0.3 / 0.6 / 0.9).  Bots take the lowest seats no player holds (`lineup()` in `room/lineup.ts`), and only exist in the match: they hold no `room_players` row.  The host's loop drives them with `botInput` every tick and ignores network input for their seats.  A match still needs 2 connected players.  Bots score and show on the results screen, but `scoresByPlayer` leaves them out, so stats hold humans only.
 - Keep payloads small and rates modest, since Realtime has per-project message quotas.
 
 ## Game rules and physics
 
 - The board is a unit circle (radius 1).  All coordinates are normalized and scaled at render time.
-- **Gates:** with N seated players at match start, gate *i* is centered at angle `2πi/N`.  Each gate's width is a fixed fraction of its sector, for example 60%.  The rim outside the gates is wall.
+- **Gates:** with N seated players at match start, gate *i* is centered at angle `2πi/N`.  Each gate's width is a fixed fraction of its sector, 80% by default (`gateFraction`).  The rim outside the gates is wall.
 - If a player leaves mid-match, their gate turns into wall.  Gates are not resized.
 - **Paddles:** each paddle is an arc at radius 0.92.  It is centered at angle φ and can only slide within its own gate's angular span.  Input changes φ at a fixed angular speed.
 - **Ball:**
   - If it crosses the paddle radius within a paddle's arc, reflect its radial velocity component.  Add tangential "english" based on how far from the paddle's center it hit.
   - If it reaches the rim inside a gate, it's a goal.  Every other seated player gets +1.  The ball respawns at the center after a short delay and launches toward a random point inside a random active gate (a ball's width from its edges), so every launch reaches a paddle before it can touch a wall.
   - If it reaches the rim on a wall, it reflects, turned by a small random angle (`wallJitter`, ±0.09 rad by default) from the game's seeded PRNG.  A plain reflection keeps a ball that passes through the center on the same diameter forever, and with an even number of gates every wall faces another wall, so a launch into a wall could bounce out of everyone's reach for good.
-  - Speed ramps up slightly after each paddle hit, up to a cap.
+  - It launches at 0.7 radii/s and speeds up 8% after each paddle hit, up to 3.
 - A match opens with a 3-second countdown before the first launch.
-- The match ends at a fixed time limit (2 minutes) or when someone reaches a score cap (10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
+- The match ends at a fixed time limit (2 minutes) or once a total number of goals has been scored, whoever scored them: a 9-1 match is over at a limit of 10.  It counts goals, not points, because a goal gives a point to every other player, so points would end a big match far sooner.  The room creator picks the limit (5, 10, 15, 20 or 25; default 10).  The host calls `finish_match`, which writes `match_results` and sets the room's `status = 'finished'`.  Everyone sees a results screen: players ranked by score, ties sharing a place (1, 1, 3).
 
 ## Frontend
 

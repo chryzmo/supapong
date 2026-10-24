@@ -29,7 +29,7 @@ describe('createRoom', () => {
     actAs(host);
     const roomId = await createRoom('Arena', 4);
 
-    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, seat: 0 });
+    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, goalLimit: 10, seat: 0 });
 
     actAs(other);
     expect(await lobbyEntry(roomId)).toEqual({
@@ -39,7 +39,16 @@ describe('createRoom', () => {
       hostName: 'Host',
       playerCount: 1,
       maxPlayers: 4,
+      goalLimit: 10,
     });
+  });
+
+  it('keeps the goal limit the creator picked', async () => {
+    actAs(host);
+    const roomId = await createRoom('Long one', 2, 25);
+    expect((await fetchRoom(roomId, 0)).goalLimit).toBe(25);
+    actAs(other);
+    expect((await lobbyEntry(roomId))?.goalLimit).toBe(25);
   });
 
   it('rejects sizes outside 2-8 and empty names', async () => {
@@ -67,7 +76,7 @@ describe('joinRoom', () => {
     expect(await joinRoom(roomId)).toBe(1);
     expect(await joinRoom(roomId)).toBe(1);
     expect((await lobbyEntry(roomId))?.playerCount).toBe(2);
-    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, seat: 1 });
+    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, goalLimit: 10, seat: 1 });
   });
 
   it('surfaces the RPC error messages', async () => {

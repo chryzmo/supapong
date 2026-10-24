@@ -1,11 +1,12 @@
 // The host's side of a match: runs the physics at a fixed 60 Hz, applies
-// everyone's inputs, and broadcasts snapshots and events.
+// everyone's inputs (and drives any bots), and broadcasts snapshots and events.
 //
 // Why host-authoritative?  One browser decides what happened, so players
 // can't disagree about a goal, and the backend stays plain Supabase with no
 // game server.  The cost is that the host is a single point of failure (if it
 // leaves, the match ends) and could cheat; both are fine for a prototype.
 import type { Gate, RoomEvent, StateMessage } from '../types';
+import { botInput } from './bot';
 import { interpolate } from './interpolate';
 import { workerTicker, type Ticker } from './loop';
 import {
@@ -39,6 +40,8 @@ export interface HostOptions {
   seed?: number;
   ticker?: Ticker;
   now?: () => number;
+  /** How well bot gates play, 0 to 1 (see botInput). */
+  botSkill?: number;
   onGoal?(gate: number): void;
   onEnd?(scores: number[]): void;
 }
@@ -91,7 +94,7 @@ export class HostGame {
   /** A player's input, by seat. */
   applyInput(seat: number, dir: Dir): void {
     const gate = this.gates.findIndex((g) => g.seat === seat);
-    if (gate !== -1 && gate !== this.myGate) this.inputs[gate] = dir;
+    if (gate !== -1 && gate !== this.myGate && !this.gates[gate]!.bot) this.inputs[gate] = dir;
   }
 
   /** A player left for good: their gate becomes wall. */
@@ -124,6 +127,10 @@ export class HostGame {
   }
 
   private tick(): void {
+    // Bots decide each tick from the state they see, like a player would.
+    this.gates.forEach((gate, i) => {
+      if (gate.bot) this.inputs[i] = botInput(this.state, i, this.config, this.options.botSkill);
+    });
     const { state, events } = step(this.state, this.inputs, this.config);
     this.prev = this.state;
     this.state = state;

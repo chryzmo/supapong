@@ -12,16 +12,16 @@ const gates: Gate[] = [
   { seat: 5, playerId: 'c', displayName: 'C' },
 ];
 
-function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG) {
+function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG, lineup: Gate[] = gates) {
   let now = 1000;
   const states: StateMessage[] = [];
   const events: RoomEvent[] = [];
   const ended: number[][] = [];
   const host = new HostGame(
     { sendState: (m) => states.push(m), send: async (e) => void events.push(e) },
-    gates,
+    lineup,
     0,
-    { config, seed: 3, now: () => now, ticker: () => () => {}, onEnd: (s) => ended.push(s) },
+    { config, seed: 3, now: () => now, ticker: () => () => {}, onEnd: (s) => ended.push(s), botSkill: 0.9 },
   );
   host.start();
   /** Moves the clock forward and runs the ticks that came due. */
@@ -35,6 +35,23 @@ function hostHarness(config: PhysicsConfig = DEFAULT_CONFIG) {
 }
 
 describe('HostGame', () => {
+  const withBot: Gate[] = [gates[0]!, { ...gates[1]!, bot: true }, gates[2]!];
+
+  it('drives bot paddles itself, and ignores network input for them', () => {
+    const { host, states, advance } = hostHarness({ ...DEFAULT_CONFIG, matchDuration: 1e9, goalLimit: 99 }, withBot);
+    host.applyInput(2, 1); // Seat 2 is the bot's gate.
+    advance(COUNTDOWN_SECONDS * 1000 - 100);
+    // Nothing to chase during the countdown, so the bot waits at its gate's center.
+    expect(states.at(-1)!.paddles[1]).toBeCloseTo(gateCenter(1, 3), 5);
+
+    let furthest = 0;
+    for (let i = 0; i < 20 * TICK_RATE; i++) {
+      advance(TICK_MS);
+      furthest = Math.max(furthest, Math.abs(host.view().gates[1]!.paddle - gateCenter(1, 3)));
+    }
+    expect(furthest).toBeGreaterThan(0.05);
+  });
+
   it('sends a snapshot at start and then every SNAPSHOT_EVERY ticks', () => {
     const { states, advance } = hostHarness();
     expect(states).toHaveLength(1);
@@ -86,7 +103,7 @@ describe('HostGame', () => {
 
   it('announces goals and the end, then stops', () => {
     // Tiny paddles and a short match, so goals happen and the clock runs out quickly.
-    const { states, events, ended, host, advance } = hostHarness({ ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 20, scoreCap: 99 });
+    const { states, events, ended, host, advance } = hostHarness({ ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 20, goalLimit: 99 });
     advance(21_000);
     const goals = events.filter((e) => e.type === 'goal');
     expect(goals.length).toBeGreaterThan(0);
@@ -134,7 +151,7 @@ describe('ClientGame', () => {
   it("eases toward the host's paddle once it stops moving", () => {
     const { client, tick } = clientHarness();
     const hostPaddle = gateCenter(1, 3) + 0.1;
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], respawn: 10, rally: 0 });
+    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, hostPaddle, gateCenter(2, 3)], active: [true, true, true], scores: [0, 0, 0], goals: 0, respawn: 10, rally: 0 });
     tick(0);
     for (let i = 0; i < 60; i++) tick(16);
     expect(client.predictedPaddle()).toBeCloseTo(hostPaddle, 3);
@@ -142,7 +159,7 @@ describe('ClientGame', () => {
 
   it("doesn't draw a predicted paddle for a gate that's been walled off", () => {
     const { client, tick } = clientHarness();
-    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], respawn: 0, rally: 0 });
+    client.onState({ tick: 3, ball: [0, 0, 0, 0], paddles: [0, 2.1, -2.1], active: [true, false, true], scores: [0, 0, 0], goals: 0, respawn: 0, rally: 0 });
     client.setOwnInput(1);
     expect(tick(200).gates[1]).toEqual({ paddle: 2.1, active: false });
   });

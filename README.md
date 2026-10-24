@@ -21,7 +21,7 @@ make dev                   # http://127.0.0.1:5173
 
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
-- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
+- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
 ## How it fits together
@@ -112,7 +112,7 @@ The design is host-authoritative with client-side interpolation.
 | Broadcast | Direction | Rate | Payload |
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input` | on change only | `{ seat, dir }`, where `dir` is -1, 0 or 1 |
-| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
+| `state` | host → guests | 20 Hz | `{ tick, ball: [x, y, vx, vy], paddles[], active[], scores[], goals, respawn, rally }`, numbers rounded to 4 decimals; under 260 bytes of JSON with 8 players |
 | `event` | host → all | rare | `start` (gate order), `goal`, `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.

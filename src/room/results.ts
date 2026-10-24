@@ -22,6 +22,7 @@ export function resultsScreen(result: MatchResult, options: ResultsOptions): Vie
       swatch.style.background = SEAT_COLORS[row.gate % SEAT_COLORS.length]!;
       const tags = h('span', { className: 'tags' });
       if (row.playerId === options.playerId) tags.append(h('span', { className: 'tag you' }, 'you'));
+      if (row.bot) tags.append(h('span', { className: 'tag' }, 'bot'));
       if (row.left) tags.append(h('span', { className: 'tag' }, 'left'));
       return h(
         'li',

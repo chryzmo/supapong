@@ -43,7 +43,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   const [hostPlayer, ...guestPlayers] = players as [TestPlayer, ...TestPlayer[]];
   const { data: roomId, error } = await hostPlayer.client.rpc('create_room', { p_name: 'Match test', p_max_players: 4 });
   if (error) throw error;
-  const base: SeatedRoom = { id: roomId, name: 'Match test', hostId: hostPlayer.id, maxPlayers: 4, seat: 0 };
+  const base: SeatedRoom = { id: roomId, name: 'Match test', hostId: hostPlayer.id, maxPlayers: 4, goalLimit: 10, seat: 0 };
 
   const open = (player: TestPlayer, seat: number) => {
     const session = new RoomSession({ ...base, seat }, { id: player.id, displayName: player.name }, {
@@ -72,7 +72,7 @@ async function startMatch(guestCount: number, config: PhysicsConfig = DEFAULT_CO
   const started = guestSessions.map(
     (session) => new Promise<Gate[]>((resolve) => session.listen({ event: (e) => e.type === 'start' && resolve(e.gates) })),
   );
-  gates = await hostSession.startMatch();
+  gates = (await hostSession.startMatch()).gates;
   await Promise.all(started);
 
   const goneIds: string[] = [];
@@ -149,7 +149,7 @@ it("turns a disconnected guest's gate into wall", async () => {
 it('announces every goal and the final score', async () => {
   // Tiny paddles and a 12-second match (3 s of it countdown): goals come
   // fast and the clock runs out.
-  const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 12, scoreCap: 99 };
+  const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 12, goalLimit: 99 };
   const { host, guests, hostGoals } = await startMatch(2, config);
   await waitFor(() => host.isOver(), 'the match to end', 20_000);
   expect(hostGoals.length).toBeGreaterThan(0);
@@ -163,7 +163,7 @@ it('announces every goal and the final score', async () => {
 });
 
 it('records the result once, finishes the room, and lets guests read it', async () => {
-  const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 5, scoreCap: 99 };
+  const config = { ...DEFAULT_CONFIG, paddleFraction: 0.01, matchDuration: 5, goalLimit: 99 };
   const { host, hostSession, guests, gates, roomId } = await startMatch(2, config);
   await waitFor(() => host.isOver(), 'the match to end', 12_000);
 

@@ -16,6 +16,7 @@ export interface Standing {
   displayName: string;
   score: number;
   left: boolean;
+  bot: boolean;
 }
 
 /**
@@ -31,6 +32,7 @@ export function standings(result: MatchResult): Standing[] {
       displayName: gate.displayName,
       score: result.scores[i] ?? 0,
       left: result.active[i] === false,
+      bot: gate.bot === true,
     }))
     .sort((a, b) => b.score - a.score || a.gate - b.gate);
 
@@ -51,7 +53,9 @@ function listNames(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
-/** The `{ player_id: points }` shape finish_match stores. */
+/** The `{ player_id: points }` shape finish_match stores.  Bots aren't players, so they're left out. */
 export function scoresByPlayer(result: MatchResult): Record<string, number> {
-  return Object.fromEntries(result.gates.map((gate, i) => [gate.playerId, result.scores[i] ?? 0]));
+  return Object.fromEntries(
+    result.gates.flatMap((gate, i) => (gate.bot ? [] : [[gate.playerId, result.scores[i] ?? 0]])),
+  );
 }

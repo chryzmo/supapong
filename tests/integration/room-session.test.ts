@@ -48,7 +48,7 @@ async function openSeat(player: TestPlayer, room: SeatedRoom): Promise<Seat> {
 async function createRoom(host: TestPlayer, maxPlayers = 4): Promise<SeatedRoom> {
   const { data, error } = await host.client.rpc('create_room', { p_name: 'Session test', p_max_players: maxPlayers });
   if (error) throw error;
-  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, seat: 0 };
+  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, goalLimit: 10, seat: 0 };
 }
 
 async function join(player: TestPlayer, room: SeatedRoom): Promise<SeatedRoom> {
@@ -180,7 +180,8 @@ describe('startMatch', () => {
     const ghost = await createPlayer('Ghost');
     await join(ghost, room);
 
-    const gates = await host.session.startMatch();
+    const { gates, goalLimit } = await host.session.startMatch();
+    expect(goalLimit).toBe(10);
 
     const expected = [host, ...guests].map((seat, i) => ({ seat: i, playerId: seat.player.id, displayName: seat.player.name }));
     expect(gates).toEqual(expected);
@@ -188,8 +189,34 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10 }]);
     }
+  });
+
+  it('adds bots in the free seats, without giving them seats in the database', async () => {
+    const { room, host, guests } = await setup(1);
+    const { gates } = await host.session.startMatch({ bots: 2, botSkill: 0.6 });
+    expect(gates.map((g) => [g.seat, g.displayName, g.bot ?? false])).toEqual([
+      [0, 'Host', false],
+      [1, 'Guest 1', false],
+      [2, 'Bot 1', true],
+      [3, 'Bot 2', true],
+    ]);
+    expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
+    await waitFor(() => guests[0]!.events.length > 0, 'the start event');
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10 }]);
+  });
+
+  it("doesn't start with more bots than free seats", async () => {
+    const { room, host } = await setup(1);
+    await expect(host.session.startMatch({ bots: 3 })).rejects.toThrow('Only 2 bots fit in this room.');
+    expect(await roomStatus(room.id)).toBe('waiting');
+  });
+
+  it('needs two connected players, even with bots', async () => {
+    const { room, host } = await setup(0);
+    await expect(host.session.startMatch({ bots: 3 })).rejects.toThrow('Need at least 2 connected players.');
+    expect(await roomStatus(room.id)).toBe('waiting');
   });
 
   it('needs at least two connected players', async () => {
