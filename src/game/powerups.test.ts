@@ -35,6 +35,17 @@ const radial = (angle: number, lastTouch = -1, rally = 0) =>
 
 const token = (kind: Pickup['kind'], x: number, y: number): Pickup => ({ kind, x, y, ticksLeft: seconds(10) });
 
+/** The ball heading for the token at (0.3, 0), and slow ones around the left half to fill the board up to maxBalls. */
+function fullOfBalls(): BallState[] {
+  return [
+    radial(0, 2),
+    ...Array.from({ length: config.maxBalls - 1 }, (_, i) => {
+      const angle = Math.PI / 2 + (Math.PI * (i + 0.5)) / (config.maxBalls - 1);
+      return ball(0.5 * Math.cos(angle), 0.5 * Math.sin(angle), 0, 0.01);
+    }),
+  ];
+}
+
 /** As many tokens as the board holds, around the left half, clear of a ball heading right from the center. */
 function fullBoard(): Pickup[] {
   return Array.from({ length: config.pickupMax }, (_, i) => {
@@ -258,9 +269,9 @@ describe('multiball', () => {
   });
 
   it('gives a wide paddle instead when the board already has the most balls', () => {
-    const full = [radial(0, 2), ball(-0.5, 0, 0, 0.01), ball(0, -0.5, 0.01, 0)];
+    const full = fullOfBalls();
     const { state } = run(inPlay(full, { pickups: [onTheWay] }), 60, (e) => e.type === 'pickup');
-    expect(state.balls).toHaveLength(3);
+    expect(state.balls).toHaveLength(config.maxBalls);
     expect(state.gates[2]!.wideTicks).toBe(seconds(config.wideDuration));
   });
 
@@ -289,7 +300,7 @@ describe('only multiball', () => {
   });
 
   it('leaves a token on the board while the most balls are in play, instead of a wide paddle', () => {
-    const full = [radial(0, 2), ball(-0.5, 0, 0, 0.01), ball(0, -0.5, 0.01, 0)];
+    const full = fullOfBalls();
     const onTheWay = token('multiball', 0.3, 0);
     const { state, events } = run(inPlay(full, { pickups: [onTheWay] }), 30, undefined, multi);
     expect(events.some((e) => e.type === 'pickup')).toBe(false);

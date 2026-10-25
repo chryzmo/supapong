@@ -9,34 +9,41 @@ export const MAX_PLAYERS = 8;
  * The version of the match messages this code speaks.  2: snapshots carry
  * `balls`.  3: power-ups.  4: match lengths and "no limit".  5: several
  * tokens on the board at once, as `pickups`.  6: smaller gates, paddles that
- * overhang them, and up to 6 tokens.  The host's `start` says the oldest
- * version that can play that match (matchProtocol), so a guest on older
- * code knows to reload, and only when it has to.
+ * overhang them, and up to 6 tokens.  7: up to 9 balls (several
+ * multiballs at once).  The host's `start` says the oldest version that can
+ * play that match (matchProtocol), so a guest on older code knows to
+ * reload, and only when it has to.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
-/** The oldest PROTOCOL_VERSION that can play a match.  Every match since 6: the board itself changed. */
-export function matchProtocol(_match: MatchSettings): number {
-  return 6;
+/**
+ * The oldest PROTOCOL_VERSION that can play a match.  6 for every match,
+ * since the board itself changed; 7 with power-ups, whose multiballs can
+ * put more than 3 balls in play.
+ */
+export function matchProtocol(match: MatchSettings): number {
+  return match.powerUps ? 7 : 6;
 }
 
 /**
  * The physics a host on older code plays, which says so with an older
  * `protocol` in its `start`.  Its guests have to replay the physics the way
- * it runs it.  Before 6: wider gates, paddles that stop at the gate's end,
- * and 3 tokens.  Before 5: one token at a time, lasting 10 s.  (Older hosts
- * also split a multiball ±20°, which no setting brings back; the snapshots
- * put the balls right within 50 ms.)
+ * it runs it.  Before 7: at most 3 balls.  Before 6: wider gates, paddles
+ * that stop at the gate's end, and 3 tokens.  Before 5: one token at a
+ * time, lasting 10 s.  (Older hosts also split a multiball ±20°, which no
+ * setting brings back; the snapshots put the balls right within 50 ms.)
  */
 export function olderHostRules(start: Pick<MatchStart, 'powerUps' | 'protocol'>): Partial<PhysicsConfig> {
-  if (start.protocol >= 6) return {};
-  const geometry = { gateFraction: 0.8, paddleOverhang: 0 };
+  if (start.protocol >= 7) return {};
+  const balls = { maxBalls: 3 };
+  if (start.protocol >= 6) return balls;
+  const geometry = { ...balls, gateFraction: 0.8, paddleOverhang: 0 };
   return start.powerUps && start.protocol < 5 ? { ...geometry, pickupMax: 1, pickupLifetime: 10 } : { ...geometry, pickupMax: 3 };
 }
 /** How many kinds of token there are (PICKUP_KINDS in physics.ts). */
 const PICKUP_KIND_COUNT = 3;
-/** Most balls a snapshot may carry. */
-export const MAX_BALLS = 8;
+/** Most balls a snapshot may carry: room above maxBalls in the physics, for tuning. */
+export const MAX_BALLS = 16;
 /** Most tokens a snapshot may carry. */
 const MAX_PICKUPS = 8;
 /** Goals in total that end a match.  The database accepts 1 to 50; the lobby offers these. */

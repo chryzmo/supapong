@@ -313,19 +313,24 @@ describe('game types', () => {
 });
 
 describe('matchProtocol', () => {
-  it('asks for protocol 6 for every match, since the board changed', () => {
+  it('asks for protocol 6 for a classic match, since the board changed, and 7 with power-ups, for more balls', () => {
     expect(matchProtocol({ powerUps: false, multiballOnly: false, goalLimit: 10, matchSeconds: 120 })).toBe(6);
-    expect(matchProtocol({ powerUps: true, multiballOnly: false, goalLimit: null, matchSeconds: 600 })).toBe(6);
+    expect(matchProtocol({ powerUps: true, multiballOnly: false, goalLimit: null, matchSeconds: 600 })).toBe(7);
+    expect(matchProtocol({ powerUps: true, multiballOnly: true, goalLimit: 10, matchSeconds: 120 })).toBe(7);
   });
 });
 
 describe('olderHostRules', () => {
-  it('changes nothing for a host on protocol 6', () => {
-    expect(olderHostRules({ powerUps: true, protocol: 6 })).toEqual({});
+  it('changes nothing for a host on protocol 7', () => {
+    expect(olderHostRules({ powerUps: true, protocol: 7 })).toEqual({});
+  });
+
+  it('keeps a host on protocol 6 to 3 balls', () => {
+    expect(olderHostRules({ powerUps: true, protocol: 6 })).toEqual({ maxBalls: 3 });
   });
 
   it("plays an older host's board: wider gates, no overhang, 3 tokens", () => {
-    expect(olderHostRules({ powerUps: true, protocol: 5 })).toEqual({ gateFraction: 0.8, paddleOverhang: 0, pickupMax: 3 });
+    expect(olderHostRules({ powerUps: true, protocol: 5 })).toEqual({ maxBalls: 3, gateFraction: 0.8, paddleOverhang: 0, pickupMax: 3 });
     expect(olderHostRules({ powerUps: false, protocol: 2 })).toMatchObject({ gateFraction: 0.8, paddleOverhang: 0 });
   });
 

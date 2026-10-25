@@ -108,7 +108,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   wideFactor: 1.6,
   wideDuration: 8,
   shieldDuration: 15,
-  maxBalls: 3,
+  maxBalls: 9,
 };
 
 /** How likely each kind of token is. */

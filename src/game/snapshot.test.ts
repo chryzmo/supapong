@@ -65,13 +65,13 @@ describe('encodeState / decodeState', () => {
         gates: Array(8).fill({ active: true, paddle: -2.123456789, wideTicks: 480, shieldTicks: 900 }),
         scores: Array(8).fill(10),
         goals: 25,
-        balls: [ball, ball, ball],
+        balls: Array(DEFAULT_CONFIG.maxBalls).fill(ball),
         pickups: Array(DEFAULT_CONFIG.pickupMax).fill({ kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 1200 }),
         pickupTimer: 720,
         seed: 4294967295,
       }),
     );
-    expect(json.length).toBeLessThan(650);
+    expect(json.length).toBeLessThan(900);
   });
 
   it('stays small', () => {
@@ -164,7 +164,13 @@ describe('SnapshotBuffer', () => {
       const drawn = buffer.sample(drawAt)!;
       const tick = Math.floor(at);
       const truth = interpolate(host[tick - 1]!, host[tick]!, at - tick);
-      expect(drawn.balls.length).toBe(truth.balls.length);
+      // A slipped ball (below) that goes in is gone from the replay until the
+      // next snapshot brings it back: the whole frame counts as off.
+      if (drawn.balls.length !== truth.balls.length) {
+        off++;
+        drawnBalls++;
+        continue;
+      }
       let slipped = false;
       drawn.balls.forEach((b, i) => {
         const d = Math.hypot(b.x - truth.balls[i]!.x, b.y - truth.balls[i]!.y);
@@ -184,12 +190,13 @@ describe('SnapshotBuffer', () => {
       expect([kinds(truth), ...(at === tick ? [kinds(host[tick - 1]!)] : [])]).toContainEqual(kinds(drawn));
       expect(drawn.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0])).toEqual(truth.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0]));
     }
-    // The replay blends paddles between snapshots, so a ball that only just
-    // caught a paddle's edge on the host can slip past it in the replay, for
-    // a frame or two until the next snapshot.  Hard bots aiming for tokens
-    // hit near the edge a lot, more so the more tokens are out.  Measured
-    // with 6 tokens: four drawn balls in about 9,400 off by more than 0.01
-    // (by up to 0.16).  Otherwise within 0.004, the same as without
+    // The replay blends paddles between snapshots, and starts from rounded
+    // positions, so a ball that only just caught a paddle's edge on the host
+    // can slip past it in the replay, for a frame or two until the next
+    // snapshot.  Hard bots aiming for tokens hit near the edge a lot, more so
+    // the more tokens and balls are out.  Measured with 6 tokens and up to 9
+    // balls: eight drawn balls in about 15,600 off by more than 0.01 or
+    // missing (by up to 0.16).  Otherwise within 0.004, the same as without
     // power-ups.  The share is what matters.  The worst moves with tuning, so
     // it's bounded by how far a slipped ball can get before the next snapshot
     // puts it right: one going out instead of back, at top speed.

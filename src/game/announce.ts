@@ -17,7 +17,8 @@ export interface Collected {
 /**
  * What got collected between drawing `prev` and `next`.  Two tokens of the
  * same kind for the same gate in one tick look like one; they'd announce
- * the same anyway.
+ * the same anyway.  A shield that another ball breaks in the same tick
+ * isn't seen: it was over before it could be drawn.
  */
 export function collected(prev: GameState, next: GameState): Collected[] {
   const found: Collected[] = [];

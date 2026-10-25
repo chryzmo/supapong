@@ -189,7 +189,7 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true, multiballOnly: false }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 7, powerUps: true, multiballOnly: false }]);
     }
   });
 
@@ -213,9 +213,9 @@ describe('startMatch', () => {
     expect(data).toEqual({ goal_limit: null, match_seconds: 300, power_ups: true, multiball_only: true });
 
     const start = await host.session.startMatch();
-    expect(start).toMatchObject({ ...settings, protocol: 6 });
+    expect(start).toMatchObject({ ...settings, protocol: 7 });
     await waitFor(() => guests[0]!.events.some((e) => e.type === 'start'), 'the start event');
-    expect(guests[0]!.events.at(-1)).toMatchObject({ type: 'start', ...settings, protocol: 6 });
+    expect(guests[0]!.events.at(-1)).toMatchObject({ type: 'start', ...settings, protocol: 7 });
   });
 
   it("won't let a guest change the settings", async () => {
@@ -234,7 +234,7 @@ describe('startMatch', () => {
     ]);
     expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true, multiballOnly: false }]);
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 7, powerUps: true, multiballOnly: false }]);
   });
 
   it('adds bots past the room size, up to 8 gates', async () => {

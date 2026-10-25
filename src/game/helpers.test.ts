@@ -206,7 +206,11 @@ describe('collected', () => {
       );
       // Two of the same kind for the same gate in one tick read as one: the
       // effect's time only goes up once.  The announcement would be the same.
-      const fromPhysics = events.filter((c, i) => events.findIndex((d) => d.gate === c.gate && d.kind === c.kind) === i);
+      // A shield another ball breaks in the same tick never shows at all.
+      const broken = result.events.flatMap((e) => (e.type === 'shield' ? [e.gate] : []));
+      const fromPhysics = events
+        .filter((c, i) => events.findIndex((d) => d.gate === c.gate && d.kind === c.kind) === i)
+        .filter((c) => !(c.kind === 'shield' && broken.includes(c.gate)));
       const order = (list: { gate: number; kind: string }[]) => list.map((c) => `${c.gate}:${c.kind}`).sort();
       expect(order(collected(state, result.state))).toEqual(order(fromPhysics));
       seen += fromPhysics.length;

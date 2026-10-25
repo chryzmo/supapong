@@ -58,6 +58,7 @@ const POWER_UP_SLIDERS: Slider[] = [
   { key: 'wideFactor', label: 'Wide paddle size (×)', min: 1, max: 3, step: 0.1 },
   { key: 'wideDuration', label: 'Wide paddle lasts (s)', min: 1, max: 20, step: 1 },
   { key: 'shieldDuration', label: 'Shield lasts (s)', min: 1, max: 30, step: 1 },
+  { key: 'maxBalls', label: 'Most balls in play', min: 1, max: 16, step: 1 },
 ];
 
 const FLASH_TICKS = 36;
