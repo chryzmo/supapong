@@ -129,10 +129,10 @@ it("shows the host's tokens on guests' screens in a match with power-ups", async
   // A token half a second into play, so the test doesn't wait for one.
   const config = { ...DEFAULT_CONFIG, powerUps: true, pickupMinSeconds: 0.5, pickupMaxSeconds: 0.5 };
   const { host, guests } = await startMatch(1, config);
-  await waitFor(() => host.view().pickup !== undefined, 'a token on the host', 8_000);
-  const { kind, x, y } = host.view().pickup!;
-  await waitFor(() => guests[0]!.client.view().pickup !== undefined, 'the token on the guest', 2_000);
-  expect(guests[0]!.client.view().pickup).toMatchObject({ kind, x: expect.closeTo(x, 3) as number, y: expect.closeTo(y, 3) as number });
+  await waitFor(() => host.view().pickups !== undefined, 'a token on the host', 8_000);
+  const { kind, x, y } = host.view().pickups![0]!;
+  await waitFor(() => guests[0]!.client.view().pickups !== undefined, 'the token on the guest', 2_000);
+  expect(guests[0]!.client.view().pickups![0]).toMatchObject({ kind, x: expect.closeTo(x, 3) as number, y: expect.closeTo(y, 3) as number });
 });
 
 it("moves a guest's paddle on the host when the guest presses a key", async () => {

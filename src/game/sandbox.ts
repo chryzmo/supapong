@@ -52,6 +52,7 @@ const POWER_UP_SLIDERS: Slider[] = [
   { key: 'pickupMinSeconds', label: 'Token timer, shortest (s)', min: 1, max: 30, step: 1 },
   { key: 'pickupMaxSeconds', label: 'Token timer, longest (s)', min: 1, max: 30, step: 1 },
   { key: 'pickupLifetime', label: 'Token lasts (s)', min: 2, max: 30, step: 1 },
+  { key: 'pickupMax', label: 'Tokens on the board at once', min: 1, max: 5, step: 1 },
   { key: 'wideFactor', label: 'Wide paddle size (×)', min: 1, max: 3, step: 0.1 },
   { key: 'wideDuration', label: 'Wide paddle lasts (s)', min: 1, max: 20, step: 1 },
   { key: 'shieldDuration', label: 'Shield lasts (s)', min: 1, max: 30, step: 1 },

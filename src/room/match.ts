@@ -9,7 +9,7 @@ import { startFrames } from '../game/loop';
 import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
 import { SEAT_COLORS, draw, type RenderView } from '../game/render';
 import { onMobileBrowser, touchControls } from '../game/touch';
-import type { MatchStart } from '../types';
+import { oneTokenRules, type MatchStart } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
 import { scoresByPlayer, type MatchResult } from './standings';
@@ -26,6 +26,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     goalLimit: start.goalLimit ?? Infinity,
     matchDuration: start.matchSeconds ?? Infinity,
     powerUps: start.powerUps,
+    ...(oneTokenRules(start) ? { pickupMax: 1, pickupLifetime: 10 } : {}),
   };
   const { room, player, isHost } = session;
   const myGate = gates.findIndex((gate) => gate.playerId === player.id);

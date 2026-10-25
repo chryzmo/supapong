@@ -5,6 +5,7 @@ import {
   ROOM_NAME_MAX,
   describeMatchEnd,
   matchProtocol,
+  oneTokenRules,
   parseInputMessage,
   parseRoomEvent,
   parseRosterEntry,
@@ -232,8 +233,12 @@ describe('parseStateMessage', () => {
   });
 
   it('keeps the power-up fields when there are some', () => {
-    const powered = { ...state, pickup: [2, 0.3, -0.4, 120], timer: 300, wide: [0, 90, 0], shield: [5, 0, 0] };
+    const powered = { ...state, pickups: [[2, 0.3, -0.4, 120], [0, -0.5, 0, 9]], timer: 300, wide: [0, 90, 0], shield: [5, 0, 0] };
     expect(parseStateMessage(powered)).toEqual(powered);
+  });
+
+  it("reads a host on protocol 3 or 4's single token as a list of one", () => {
+    expect(parseStateMessage({ ...state, pickup: [2, 0.3, -0.4, 120] })).toEqual({ ...state, pickups: [[2, 0.3, -0.4, 120]] });
   });
 
   it.each([
@@ -255,9 +260,12 @@ describe('parseStateMessage', () => {
     ['a missing respawn', { ...state, respawn: undefined }],
     ['a fractional seed', { ...state, seed: 1.5 }],
     ['a seed past 32 bits', { ...state, seed: 2 ** 32 }],
-    ['a token of an unknown kind', { ...state, pickup: [3, 0, 0, 10] }],
-    ['a short token', { ...state, pickup: [0, 0, 0] }],
-    ['a token with fractional ticks left', { ...state, pickup: [0, 0, 0, 1.5] }],
+    ['a token of an unknown kind', { ...state, pickups: [[3, 0, 0, 10]] }],
+    ['a single token of an unknown kind', { ...state, pickup: [3, 0, 0, 10] }],
+    ['tokens that are not a list', { ...state, pickups: [0, 0, 0, 10] }],
+    ['too many tokens', { ...state, pickups: Array(9).fill([0, 0, 0, 10]) }],
+    ['a short token', { ...state, pickups: [[0, 0, 0]] }],
+    ['a token with fractional ticks left', { ...state, pickups: [[0, 0, 0, 1.5]] }],
     ['a negative timer', { ...state, timer: -1 }],
     ['wide paddles for the wrong number of gates', { ...state, wide: [0, 0] }],
     ['a fractional shield', { ...state, shield: [0, 0.5, 0] }],
@@ -277,8 +285,18 @@ describe('describeMatchEnd', () => {
 describe('matchProtocol', () => {
   it('asks only as new a guest as the match needs', () => {
     expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 120 })).toBe(2);
-    expect(matchProtocol({ powerUps: true, goalLimit: 10, matchSeconds: 120 })).toBe(3);
+    expect(matchProtocol({ powerUps: true, goalLimit: 10, matchSeconds: 120 })).toBe(5);
+    expect(matchProtocol({ powerUps: true, goalLimit: null, matchSeconds: 600 })).toBe(5);
     expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 300 })).toBe(4);
     expect(matchProtocol({ powerUps: false, goalLimit: null, matchSeconds: 120 })).toBe(4);
+  });
+});
+
+describe('oneTokenRules', () => {
+  it('applies only to power-ups matches started by a host on protocol 3 or 4', () => {
+    expect(oneTokenRules({ powerUps: true, protocol: 3 })).toBe(true);
+    expect(oneTokenRules({ powerUps: true, protocol: 4 })).toBe(true);
+    expect(oneTokenRules({ powerUps: true, protocol: 5 })).toBe(false);
+    expect(oneTokenRules({ powerUps: false, protocol: 2 })).toBe(false);
   });
 });

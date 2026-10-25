@@ -127,6 +127,10 @@ Done: migration `20261025020000_power_ups.sql`, the lobby option and label, the 
 
 About a day.
 
+### Since
+
+- **Three tokens:** up to 3 on the board at once (`pickupMax`), each lasting 20 s instead of 10.  The timer runs while there's room on the board, a volley spawns unless it's full, and a new token tries a few seeded spots to land clear of the others.  Snapshots carry `pickups` as a list, so power-up matches need protocol 5.  A guest still parses an old host's single `pickup`, and plays an old host's match (its `start` says 3 or 4) by the one-token rules.
+
 ### Later
 
 - **Tune from real play:** in bot games most shields expire unused, and fewer than half the tokens get collected.  Try longer shields or bigger tokens in the sandbox.

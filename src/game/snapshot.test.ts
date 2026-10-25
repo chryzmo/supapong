@@ -33,15 +33,21 @@ describe('encodeState / decodeState', () => {
     expect(back.gates.map((g) => g.active)).toEqual([true, true, true]);
   });
 
-  it('carries power-ups: the token, the timer, and each gate\'s effects', () => {
+  it('carries power-ups: the tokens, the timer, and each gate\'s effects', () => {
     const state: GameState = {
       ...playing(10).at(-1)!,
-      pickup: { kind: 'multiball', x: 0.31234567, y: -0.4, ticksLeft: 200 },
+      pickups: [
+        { kind: 'multiball', x: 0.31234567, y: -0.4, ticksLeft: 200 },
+        { kind: 'shield', x: -0.5, y: 0.1, ticksLeft: 1100 },
+      ],
       pickupTimer: 77,
       gates: playing(10).at(-1)!.gates.map((g, i) => (i === 1 ? { ...g, wideTicks: 90, shieldTicks: 5 } : g)),
     };
     const back = decodeState(parseStateMessage(JSON.parse(JSON.stringify(encodeState(state))))!);
-    expect(back.pickup).toEqual({ kind: 'multiball', x: 0.3123, y: -0.4, ticksLeft: 200 });
+    expect(back.pickups).toEqual([
+      { kind: 'multiball', x: 0.3123, y: -0.4, ticksLeft: 200 },
+      { kind: 'shield', x: -0.5, y: 0.1, ticksLeft: 1100 },
+    ]);
     expect(back.pickupTimer).toBe(77);
     expect(back.gates.map((g) => [g.wideTicks, g.shieldTicks])).toEqual([[undefined, undefined], [90, 5], [undefined, undefined]]);
   });
@@ -59,12 +65,12 @@ describe('encodeState / decodeState', () => {
         scores: Array(8).fill(10),
         goals: 25,
         balls: [ball, ball, ball],
-        pickup: { kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 600 },
+        pickups: Array(3).fill({ kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 1200 }),
         pickupTimer: 720,
         seed: 4294967295,
       }),
     );
-    expect(json.length).toBeLessThan(500);
+    expect(json.length).toBeLessThan(550);
   });
 
   it('stays small', () => {
@@ -164,17 +170,17 @@ describe('SnapshotBuffer', () => {
         drawnBalls++;
         if (d > 0.01) off++;
       });
-      expect(drawn.pickup?.kind).toBe(truth.pickup?.kind);
+      expect(drawn.pickups?.map((p) => p.kind)).toEqual(truth.pickups?.map((p) => p.kind));
       expect(drawn.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0])).toEqual(truth.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0]));
     }
     // The replay blends paddles between snapshots, so a ball that only just
     // caught a paddle's edge on the host can slip past it in the replay, for
     // a frame or two until the next snapshot.  Hard bots aiming for tokens
-    // hit near the edge a lot.  Measured: one drawn ball in about 7,000 off by
-    // more than 0.01 (by 0.039).  Otherwise within 0.004, the same as without
-    // power-ups.
+    // hit near the edge a lot, more so with three tokens out.  Measured: four
+    // drawn balls in about 7,400 off by more than 0.01 (by up to 0.068).
+    // Otherwise within 0.004, the same as without power-ups.
     expect(off / drawnBalls).toBeLessThan(0.001);
-    expect(worst).toBeLessThan(0.05);
+    expect(worst).toBeLessThan(0.08);
   });
 
   it('runs the physics on when the next snapshot is late, for at most MAX_EXTRAPOLATE_TICKS', () => {

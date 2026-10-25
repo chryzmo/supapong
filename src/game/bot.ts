@@ -79,7 +79,7 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
     // paddle's counterclockwise end (paddle clockwise of it) adds to it.
     const drift = vy * Math.cos(crossing) - vx * Math.sin(crossing);
     const side = drift > 0 || (drift === 0 && rally % 2 === 0) ? 1 : -1;
-    const throughToken = skill >= AIMS_FOR_TOKENS && state.pickup ? aimThrough(x + vx * t, y + vy * t, vx, vy, state.pickup, config) : null;
+    const throughToken = skill >= AIMS_FOR_TOKENS ? aimThroughAny(x + vx * t, y + vy * t, vx, vy, state.pickups ?? [], config) : null;
     const offset = throughToken ?? side * AIM_OFFSET;
     precise = throughToken !== null;
     // Meeting the ball `offset` of the half-width from the paddle's center
@@ -95,6 +95,15 @@ export function botInput(state: GameState, gate: number, config: PhysicsConfig, 
   const deadzone = precise ? step * 0.6 : half * 0.25;
   if (Math.abs(diff) < deadzone) return 0;
   return diff > 0 ? 1 : -1;
+}
+
+/** aimThrough for the first of `tokens` the return can go through, or null if none. */
+function aimThroughAny(px: number, py: number, vx: number, vy: number, tokens: readonly Pickup[], config: PhysicsConfig): number | null {
+  for (const token of tokens) {
+    const offset = aimThrough(px, py, vx, vy, token, config);
+    if (offset !== null) return offset;
+  }
+  return null;
 }
 
 /**

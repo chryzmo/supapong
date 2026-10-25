@@ -144,9 +144,10 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.shadowBlur = 0;
   });
 
-  if (state.pickup && !blinkOff(state.pickup.ticksLeft)) {
-    const [px, py] = toScreen(state.pickup.x, state.pickup.y);
-    drawToken(ctx, px, py, Math.max(8, config.pickupRadius * R), state.pickup.kind);
+  for (const pickup of state.pickups ?? []) {
+    if (blinkOff(pickup.ticksLeft)) continue;
+    const [px, py] = toScreen(pickup.x, pickup.y);
+    drawToken(ctx, px, py, Math.max(8, config.pickupRadius * R), pickup.kind);
   }
 
   // Balls, with a soft glow, each in the color of whoever would score if it

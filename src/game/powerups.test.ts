@@ -59,7 +59,7 @@ describe('power-ups', () => {
       state = result.state;
       expect(result.events.some((e) => e.type === 'spawn')).toBe(false);
     }
-    expect(state.pickup).toBeUndefined();
+    expect(state.pickups).toBeUndefined();
   });
 
   it('play out the same way from the same seed', () => {
@@ -83,36 +83,60 @@ describe('power-ups', () => {
 describe('spawning', () => {
   it('puts a token out when the timer runs out, and rolls a new timer', () => {
     const { state, events } = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 1 }), 1);
-    expect(events).toContainEqual({ type: 'spawn', kind: state.pickup!.kind });
-    expect(Math.hypot(state.pickup!.x, state.pickup!.y)).toBeGreaterThanOrEqual(0.25);
-    expect(Math.hypot(state.pickup!.x, state.pickup!.y)).toBeLessThanOrEqual(0.65);
+    const [pickup] = state.pickups!;
+    expect(events).toContainEqual({ type: 'spawn', kind: pickup!.kind });
+    expect(Math.hypot(pickup!.x, pickup!.y)).toBeGreaterThanOrEqual(0.25);
+    expect(Math.hypot(pickup!.x, pickup!.y)).toBeLessThanOrEqual(0.65);
+    expect(pickup!.ticksLeft).toBe(seconds(20));
     expect(state.pickupTimer).toBeGreaterThanOrEqual(seconds(config.pickupMinSeconds));
     expect(state.pickupTimer).toBeLessThanOrEqual(seconds(config.pickupMaxSeconds));
   });
 
-  it('runs the timer only while a ball is in play and the board is empty', () => {
-    const busy = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickup: token('wide', -0.5, 0) }), 3).state;
+  it('runs the timer only while a ball is in play and the board has room', () => {
+    const full = [token('wide', -0.5, 0), token('shield', 0, 0.5), token('multiball', 0, -0.5)];
+    const busy = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickups: full }), 3).state;
     expect(busy.pickupTimer).toBe(5);
+    const room = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickups: full.slice(0, 2) }), 3).state;
+    expect(room.pickupTimer).toBe(2);
     const waiting = run({ ...inPlay([ball(0, 0, 0, 0)], { pickupTimer: 5 }), respawnTicks: 30 }, 3).state;
     expect(waiting.pickupTimer).toBe(5);
     expect(run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5 }), 3).state.pickupTimer).toBe(2);
   });
 
-  it("puts one out on a ball's volley, unless one is already out", () => {
+  it("puts one out on a ball's volley, unless the board is full", () => {
     // The ball's 5th hit so far; it's about to make the 6th, off gate 0.
     const volley = run(inPlay([radial(0, 1, 5)]), 300, (e) => e.type === 'hit');
     expect(volley.events.some((e) => e.type === 'spawn')).toBe(true);
-    expect(volley.state.pickup).toBeDefined();
+    expect(volley.state.pickups).toHaveLength(1);
 
     const out = token('shield', -0.5, 0.1);
-    const busy = run(inPlay([radial(0, 1, 5)], { pickup: out }), 300, (e) => e.type === 'hit');
+    const another = run(inPlay([radial(0, 1, 5)], { pickups: [out] }), 300, (e) => e.type === 'hit');
+    expect(another.events.some((e) => e.type === 'spawn')).toBe(true);
+    expect(another.state.pickups).toHaveLength(2);
+    expect(another.state.pickups![0]).toMatchObject({ kind: 'shield', x: -0.5, y: 0.1 });
+
+    const full = [out, token('wide', 0, 0.5), token('wide', 0, -0.5)];
+    const busy = run(inPlay([radial(0, 1, 5)], { pickups: full }), 300, (e) => e.type === 'hit');
     expect(busy.events.some((e) => e.type === 'spawn')).toBe(false);
-    expect(busy.state.pickup).toMatchObject({ kind: 'shield', x: -0.5, y: 0.1 });
+    expect(busy.state.pickups).toHaveLength(3);
+  });
+
+  it('keeps tokens clear of each other', () => {
+    for (let seed = 0; seed < 200; seed++) {
+      let state = run({ ...inPlay([ball(0, 0, 0.001, 0)]), seed, pickupTimer: 1 }, 1).state;
+      state = run({ ...state, pickupTimer: 1 }, 1).state;
+      state = run({ ...state, pickupTimer: 1 }, 1).state;
+      const [a, b, c] = state.pickups!;
+      for (const [p, q] of [[a!, b!], [a!, c!], [b!, c!]] as const) {
+        expect(Math.hypot(p.x - q.x, p.y - q.y)).toBeGreaterThan(2 * config.pickupRadius);
+      }
+    }
   });
 
   it('fades a token nobody collects', () => {
-    const { state } = run(inPlay([ball(0, 0, 0.01, 0)], { pickup: { ...token('wide', -0.5, 0), ticksLeft: 2 } }), 2);
-    expect(state.pickup).toBeUndefined();
+    const { state } = run(inPlay([ball(0, 0, 0.01, 0)], { pickups: [{ ...token('wide', -0.5, 0), ticksLeft: 2 }, token('shield', 0.5, 0)] }), 2);
+    expect(state.pickups).toEqual([{ ...token('shield', 0.5, 0), ticksLeft: seconds(10) - 2 }]);
+    expect(run(state, seconds(10)).state.pickups).toBeUndefined();
   });
 });
 
@@ -120,30 +144,41 @@ describe('collecting', () => {
   const onTheWay = token('wide', 0.3, 0);
 
   it("goes to the ball's last toucher", () => {
-    const { state, events } = run(inPlay([radial(0, 2)], { pickup: onTheWay }), 60, (e) => e.type === 'pickup');
+    const { state, events } = run(inPlay([radial(0, 2)], { pickups: [onTheWay] }), 60, (e) => e.type === 'pickup');
     expect(events).toContainEqual({ type: 'pickup', kind: 'wide', gate: 2, ball: 0 });
-    expect(state.pickup).toBeUndefined();
+    expect(state.pickups).toBeUndefined();
     expect(state.gates[2]!.wideTicks).toBe(seconds(config.wideDuration));
   });
 
   it('leaves the token for a ball nobody has touched', () => {
-    const { state, events } = run(inPlay([radial(0)], { pickup: onTheWay }), 30);
+    const { state, events } = run(inPlay([radial(0)], { pickups: [onTheWay] }), 30);
     expect(events.some((e) => e.type === 'pickup')).toBe(false);
-    expect(state.pickup).toMatchObject({ kind: 'wide', x: 0.3, y: 0 });
+    expect(state.pickups).toMatchObject([{ kind: 'wide', x: 0.3, y: 0 }]);
+  });
+
+  it('leaves the tokens the ball misses, and takes every one it passes through', () => {
+    const elsewhere = token('shield', -0.5, 0);
+    const further = token('multiball', 0.5, 0);
+    const { state, events } = run(inPlay([radial(0, 2)], { pickups: [onTheWay, elsewhere, further] }), 40);
+    expect(events.filter((e) => e.type === 'pickup')).toEqual([
+      { type: 'pickup', kind: 'wide', gate: 2, ball: 0 },
+      { type: 'pickup', kind: 'multiball', gate: 2, ball: 0 },
+    ]);
+    expect(state.pickups).toEqual([{ ...elsewhere, ticksLeft: elsewhere.ticksLeft - 40 }]);
   });
 
   it("can't be skipped by a fast ball between ticks", () => {
     const tiny = { ...config, pickupRadius: 0.001 };
     // At speed 3 the ball moves 0.05 a tick: from 0.2 to 0.25, past a token at 0.225.
-    const fast = inPlay([ball(0.2, 0, 3, 0, 1)], { pickup: token('shield', 0.225, 0) });
+    const fast = inPlay([ball(0.2, 0, 3, 0, 1)], { pickups: [token('shield', 0.225, 0)] });
     expect(run(fast, 1, undefined, tiny).events).toContainEqual({ type: 'pickup', kind: 'shield', gate: 1, ball: 0 });
   });
 
   it("is used up, with no effect, when the last toucher has left", () => {
-    const gone = setGateActive(inPlay([radial(0, 2)], { pickup: onTheWay }), 2, false);
+    const gone = setGateActive(inPlay([radial(0, 2)], { pickups: [onTheWay] }), 2, false);
     const { state, events } = run(gone, 60, (e) => e.type === 'pickup');
     expect(events).toContainEqual({ type: 'pickup', kind: 'wide', gate: -1, ball: 0 });
-    expect(state.pickup).toBeUndefined();
+    expect(state.pickups).toBeUndefined();
     expect(state.gates[2]!.wideTicks).toBeUndefined();
   });
 });
@@ -194,7 +229,7 @@ describe('multiball', () => {
   const onTheWay = token('multiball', 0.3, 0);
 
   it('splits the ball into three, heading 20° apart', () => {
-    const { state } = run(inPlay([radial(0, 2)], { pickup: onTheWay }), 60, (e) => e.type === 'pickup');
+    const { state } = run(inPlay([radial(0, 2)], { pickups: [onTheWay] }), 60, (e) => e.type === 'pickup');
     expect(state.balls).toHaveLength(3);
     const headings = state.balls.map((b) => Math.atan2(b.vy, b.vx));
     expect(headings[1]! - headings[0]!).toBeCloseTo((20 * Math.PI) / 180);
@@ -204,7 +239,7 @@ describe('multiball', () => {
 
   it('gives a wide paddle instead when the board already has the most balls', () => {
     const full = [radial(0, 2), ball(-0.5, 0, 0, 0.01), ball(0, -0.5, 0.01, 0)];
-    const { state } = run(inPlay(full, { pickup: onTheWay }), 60, (e) => e.type === 'pickup');
+    const { state } = run(inPlay(full, { pickups: [onTheWay] }), 60, (e) => e.type === 'pickup');
     expect(state.balls).toHaveLength(3);
     expect(state.gates[2]!.wideTicks).toBe(seconds(config.wideDuration));
   });
@@ -227,7 +262,7 @@ describe('bots', () => {
     const shot = radial(0, 1);
     const [bx, by] = paddleBounce(hitR, 0, shot.vx, shot.vy, 0.6, config);
     const along = 0.45 / Math.hypot(bx, by);
-    const start = inPlay([shot], { pickup: token('wide', hitR + bx * along, by * along) });
+    const start = inPlay([shot], { pickups: [token('wide', hitR + bx * along, by * along)] });
     const play = (skill: number) => {
       let state = start;
       for (let t = 0; t < seconds(3); t++) {

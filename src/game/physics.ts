@@ -51,12 +51,14 @@ export interface PhysicsConfig {
   powerUps: boolean;
   /** A token appears on a ball's every this-many-th consecutive hit. */
   pickupVolley: number;
-  /** Otherwise one appears after this many seconds (rolled between the two) with none on the board. */
+  /** Otherwise one appears after this many seconds (rolled between the two) with room on the board. */
   pickupMinSeconds: number;
   pickupMaxSeconds: number;
   /** Seconds an uncollected token stays. */
   pickupLifetime: number;
   pickupRadius: number;
+  /** Most tokens on the board at once. */
+  pickupMax: number;
   /** Wide paddle: how much wider, and for how many seconds. */
   wideFactor: number;
   wideDuration: number;
@@ -85,8 +87,9 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   pickupVolley: 6,
   pickupMinSeconds: 8,
   pickupMaxSeconds: 12,
-  pickupLifetime: 10,
+  pickupLifetime: 20,
   pickupRadius: 0.06,
+  pickupMax: 3,
   wideFactor: 1.6,
   wideDuration: 8,
   shieldDuration: 15,
@@ -102,6 +105,10 @@ const PICKUP_ODDS: [PickupKind, number][] = [
 /** Tokens appear between these radii: off the launch point, clear of the paddles. */
 const PICKUP_MIN_RADIUS = 0.25;
 const PICKUP_MAX_RADIUS = 0.65;
+/** A new token tries this many spots for one clear of the others, and takes the last if none is. */
+const PICKUP_PLACE_TRIES = 4;
+/** How far apart two tokens' centers should be, in token radii, so they don't overlap. */
+const PICKUP_SPACING = 3;
 /** How far either way the two new balls of a multiball head from the old one. */
 const MULTIBALL_SPREAD = (20 * Math.PI) / 180;
 
@@ -162,9 +169,9 @@ export interface GameState {
   respawnTicks: number;
   /** PRNG state. */
   seed: number;
-  /** With power-ups on: the token on the board, if any. */
-  pickup?: Pickup;
-  /** With power-ups on: ticks of play with an empty board until a token appears. */
+  /** With power-ups on: the tokens on the board, at most pickupMax.  Absent when there are none. */
+  pickups?: Pickup[];
+  /** With power-ups on: ticks of play with room on the board until a token appears. */
   pickupTimer?: number;
 }
 
@@ -324,7 +331,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   });
 
   let next: GameState = { ...state, tick: state.tick + 1, gates };
-  if (config.powerUps) next = tickPickup(next);
+  if (config.powerUps) next = tickPickups(next);
 
   // Waiting at the center.
   if (state.respawnTicks > 0) {
@@ -346,7 +353,7 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   let scores = next.scores;
   let goals = next.goals;
   let seed = next.seed;
-  let pickup = next.pickup;
+  let pickups = next.pickups ?? [];
   let pickupTimer = next.pickupTimer;
   for (const [index, ball] of state.balls.entries()) {
     const moved = moveBall(ball, index, gates, seed, config, events);
@@ -361,9 +368,11 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
     balls.push(moved.ball);
     if (!config.powerUps) continue;
 
-    // Through a token, after someone has touched it: they get it.
+    // Through a token, after someone has touched it: they get it.  A ball
+    // collects every token on its path, in board order.
     const owner = moved.ball.lastTouch;
-    if (pickup && owner >= 0 && pathMeets(moved.path, pickup, config.pickupRadius + config.ballRadius)) {
+    const collected = owner >= 0 ? pickups.filter((p) => pathMeets(moved.path, p, config.pickupRadius + config.ballRadius)) : [];
+    for (const pickup of collected) {
       const active = gates[owner]?.active === true;
       // Multiball with no room for more balls gives a wide paddle instead.
       const room = config.maxBalls - balls.length - split.length - (state.balls.length - index - 1);
@@ -372,22 +381,26 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
       if (active && kind === 'wide') gates = gates.map((g, i) => (i === owner ? { ...g, wideTicks: Math.round(config.wideDuration * TICK_RATE) } : g));
       if (active && kind === 'shield') gates = gates.map((g, i) => (i === owner ? { ...g, shieldTicks: Math.round(config.shieldDuration * TICK_RATE) } : g));
       if (active && kind === 'multiball') split.push(...splitBall(moved.ball, Math.min(2, room)));
-      pickup = undefined;
     }
+    if (collected.length > 0) pickups = pickups.filter((p) => !collected.includes(p));
 
     // A volley: this ball's every pickupVolley-th hit in a row.
     const hit = moved.ball.rally > ball.rally;
-    if (!pickup && hit && moved.ball.rally % config.pickupVolley === 0) {
-      [pickup, pickupTimer, seed] = spawnPickup(seed, config);
+    if (pickups.length < config.pickupMax && hit && moved.ball.rally % config.pickupVolley === 0) {
+      let pickup: Pickup;
+      [pickup, pickupTimer, seed] = spawnPickup(seed, pickups, config);
+      pickups = [...pickups, pickup];
       events.push({ type: 'spawn', kind: pickup.kind });
     }
   }
 
-  if (config.powerUps && !pickup && balls.length > 0) {
-    // The timer only runs with the board empty.
+  if (config.powerUps && pickups.length < config.pickupMax && balls.length > 0) {
+    // The timer only runs while there's room on the board.
     pickupTimer = Math.max(0, (pickupTimer ?? 0) - 1);
     if (pickupTimer === 0) {
-      [pickup, pickupTimer, seed] = spawnPickup(seed, config);
+      let pickup: Pickup;
+      [pickup, pickupTimer, seed] = spawnPickup(seed, pickups, config);
+      pickups = [...pickups, pickup];
       events.push({ type: 'spawn', kind: pickup.kind });
     }
   }
@@ -396,8 +409,8 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
   next = { ...next, gates, balls, scores, goals, seed };
   if (config.powerUps) {
     next.pickupTimer = pickupTimer ?? 0;
-    if (pickup) next.pickup = pickup;
-    else delete next.pickup;
+    if (pickups.length > 0) next.pickups = pickups;
+    else delete next.pickups;
   }
   // The last ball gone: wait, then launch a new one.
   if (balls.length === 0) next = { ...next, balls: [restingBall()], respawnTicks: Math.round(config.respawnDelay * TICK_RATE) };
@@ -419,12 +432,12 @@ function withoutShield(gate: GateState): GateState {
   return rest;
 }
 
-/** One tick off the token on the board; it's gone when it runs out. */
-function tickPickup(state: GameState): GameState {
-  if (!state.pickup) return state;
-  const ticksLeft = state.pickup.ticksLeft - 1;
-  if (ticksLeft > 0) return { ...state, pickup: { ...state.pickup, ticksLeft } };
-  const { pickup: _, ...rest } = state;
+/** One tick off each token on the board; each is gone when it runs out. */
+function tickPickups(state: GameState): GameState {
+  if (!state.pickups) return state;
+  const pickups = state.pickups.map((p) => ({ ...p, ticksLeft: p.ticksLeft - 1 })).filter((p) => p.ticksLeft > 0);
+  if (pickups.length > 0) return { ...state, pickups };
+  const { pickups: _, ...rest } = state;
   return rest;
 }
 
@@ -435,12 +448,17 @@ function pickupDelay(seed: number, config: PhysicsConfig): [number, number] {
   return [Math.max(1, Math.round(seconds * TICK_RATE)), next];
 }
 
-/** A new token, and a fresh timer.  @returns [token, timer, next seed] */
-function spawnPickup(seed: number, config: PhysicsConfig): [Pickup, number, number] {
+/**
+ * A new token, clear of the ones already out if it can be, and a fresh
+ * timer.  @returns [token, timer, next seed]
+ */
+function spawnPickup(seed: number, others: readonly Pickup[], config: PhysicsConfig): [Pickup, number, number] {
   const [kindRoll, s1] = nextRandom(seed);
-  const [radiusRoll, s2] = nextRandom(s1);
-  const [angleRoll, s3] = nextRandom(s2);
-  const [timer, s4] = pickupDelay(s3, config);
+  let [x, y, s2] = pickupSpot(s1);
+  for (let tries = 1; tries < PICKUP_PLACE_TRIES && others.some((p) => Math.hypot(p.x - x, p.y - y) < PICKUP_SPACING * config.pickupRadius); tries++) {
+    [x, y, s2] = pickupSpot(s2);
+  }
+  const [timer, s3] = pickupDelay(s2, config);
   let kind = PICKUP_ODDS.at(-1)![0];
   let total = 0;
   for (const [candidate, odds] of PICKUP_ODDS) {
@@ -450,10 +468,17 @@ function spawnPickup(seed: number, config: PhysicsConfig): [Pickup, number, numb
       break;
     }
   }
+  const pickup = { kind, x, y, ticksLeft: Math.round(config.pickupLifetime * TICK_RATE) };
+  return [pickup, timer, s3];
+}
+
+/** A random spot for a token, between PICKUP_MIN_RADIUS and PICKUP_MAX_RADIUS.  @returns [x, y, next seed] */
+function pickupSpot(seed: number): [number, number, number] {
+  const [radiusRoll, s1] = nextRandom(seed);
+  const [angleRoll, s2] = nextRandom(s1);
   const r = PICKUP_MIN_RADIUS + radiusRoll * (PICKUP_MAX_RADIUS - PICKUP_MIN_RADIUS);
   const angle = angleRoll * 2 * Math.PI;
-  const pickup = { kind, x: r * Math.cos(angle), y: r * Math.sin(angle), ticksLeft: Math.round(config.pickupLifetime * TICK_RATE) };
-  return [pickup, timer, s4];
+  return [r * Math.cos(angle), r * Math.sin(angle), s2];
 }
 
 /** `count` more balls from `ball`, heading MULTIBALL_SPREAD either side of it. */

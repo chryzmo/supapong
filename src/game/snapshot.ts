@@ -37,11 +37,11 @@ export function encodeState(state: GameState): StateMessage {
 
 /** The power-up fields of a snapshot, leaving out any with nothing to say. */
 function encodePowerUps(state: GameState): Partial<StateMessage> {
-  const { pickup, pickupTimer } = state;
+  const { pickups, pickupTimer } = state;
   const wide = state.gates.map((g) => g.wideTicks ?? 0);
   const shield = state.gates.map((g) => g.shieldTicks ?? 0);
   return {
-    ...(pickup ? { pickup: [PICKUP_KINDS.indexOf(pickup.kind), round(pickup.x), round(pickup.y), pickup.ticksLeft] } : {}),
+    ...(pickups?.length ? { pickups: pickups.map((p) => [PICKUP_KINDS.indexOf(p.kind), round(p.x), round(p.y), p.ticksLeft]) } : {}),
     ...(pickupTimer !== undefined ? { timer: pickupTimer } : {}),
     ...(wide.some((t) => t > 0) ? { wide } : {}),
     ...(shield.some((t) => t > 0) ? { shield } : {}),
@@ -71,8 +71,8 @@ export function decodeState(message: StateMessage): GameState {
     goals: message.goals,
     respawnTicks: message.respawn,
     seed: message.seed ?? 0,
-    ...(message.pickup
-      ? { pickup: { kind: PICKUP_KINDS[message.pickup[0]] ?? 'wide', x: message.pickup[1], y: message.pickup[2], ticksLeft: message.pickup[3] } }
+    ...(message.pickups
+      ? { pickups: message.pickups.map(([kind, x, y, ticksLeft]) => ({ kind: PICKUP_KINDS[kind] ?? 'wide', x, y, ticksLeft })) }
       : {}),
     ...(message.timer !== undefined ? { pickupTimer: message.timer } : {}),
   };

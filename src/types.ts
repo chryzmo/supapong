@@ -7,21 +7,33 @@ export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
 /**
  * The version of the match messages this code speaks.  2: snapshots carry
- * `balls`.  3: power-ups.  4: match lengths and "no limit".  The host's
+ * `balls`.  3: power-ups.  4: match lengths and "no limit".  5: up to 3
+ * tokens on the board at once, as `pickups`.  The host's
  * `start` says the oldest version that can play that match (matchProtocol),
  * so a guest on older code knows to reload, and only when it has to.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** The oldest PROTOCOL_VERSION that can play a match. */
 export function matchProtocol(match: MatchSettings): number {
-  if (match.goalLimit === null || match.matchSeconds !== DEFAULT_MATCH_SECONDS) return 4;
-  return match.powerUps ? 3 : 2;
+  if (match.powerUps) return 5;
+  return match.goalLimit === null || match.matchSeconds !== DEFAULT_MATCH_SECONDS ? 4 : 2;
+}
+
+/**
+ * Whether a power-ups match keeps the rules from before protocol 5: one
+ * token at a time, lasting 10 s.  A host on older code says 3 or 4 in its
+ * `start`, and its guests have to replay the physics the way it runs them.
+ */
+export function oneTokenRules(start: Pick<MatchStart, 'powerUps' | 'protocol'>): boolean {
+  return start.powerUps && start.protocol < 5;
 }
 /** How many kinds of token there are (PICKUP_KINDS in physics.ts). */
 const PICKUP_KIND_COUNT = 3;
 /** Most balls a snapshot may carry. */
 export const MAX_BALLS = 8;
+/** Most tokens a snapshot may carry. */
+const MAX_PICKUPS = 8;
 /** Goals in total that end a match.  The database accepts 1 to 50; the lobby offers these. */
 export const GOAL_LIMIT_CHOICES = [5, 10, 15, 20, 25] as const;
 export const DEFAULT_GOAL_LIMIT = 10;
@@ -192,6 +204,9 @@ export interface InputMessage {
  */
 export type BallTuple = [number, number, number, number, number, number];
 
+/** One token: kind (an index into PICKUP_KINDS), x, y, ticks left. */
+export type PickupTuple = [number, number, number, number];
+
 export interface StateMessage {
   tick: number;
   /** Never empty: while waiting to launch, one ball resting at the center. */
@@ -207,9 +222,9 @@ export interface StateMessage {
   respawn: number;
   // Power-ups.  Left out when there's nothing to say, so a classic match's
   // snapshots stay as they were.
-  /** The token on the board: kind (an index into PICKUP_KINDS), x, y, ticks left. */
-  pickup?: [number, number, number, number];
-  /** Ticks of play with an empty board until the timer puts a token out. */
+  /** The tokens on the board, never empty.  A host on protocol 3 or 4 sends one as `pickup` instead. */
+  pickups?: PickupTuple[];
+  /** Ticks of play with room on the board until the timer puts a token out. */
   timer?: number;
   /** Per gate: ticks left of a wide paddle, and of a shield. */
   wide?: number[];
@@ -344,12 +359,9 @@ export function parseStateMessage(value: unknown): StateMessage | null {
   if (!Array.isArray(scores) || scores.length !== n || !scores.every(isCount)) return null;
   const balls = parseBalls(value, n);
   if (!balls) return null;
-  const { pickup, timer, wide, shield } = value;
-  if (pickup !== undefined) {
-    if (!isNumberArray(pickup, 4)) return null;
-    const [kind, , , ticksLeft] = pickup;
-    if (!(isCount(kind) && kind < PICKUP_KIND_COUNT) || !isCount(ticksLeft)) return null;
-  }
+  const pickups = parsePickups(value);
+  if (pickups === null) return null;
+  const { timer, wide, shield } = value;
   if (timer !== undefined && !isCount(timer)) return null;
   for (const effect of [wide, shield]) {
     if (effect !== undefined && !(Array.isArray(effect) && effect.length === n && effect.every(isCount))) return null;
@@ -363,11 +375,25 @@ export function parseStateMessage(value: unknown): StateMessage | null {
     goals,
     ...(seed !== undefined ? { seed } : {}),
     respawn,
-    ...(isNumberArray(pickup, 4) ? { pickup: [pickup[0]!, pickup[1]!, pickup[2]!, pickup[3]!] } : {}),
+    ...(pickups.length > 0 ? { pickups } : {}),
     ...(isCount(timer) ? { timer } : {}),
     ...(Array.isArray(wide) ? { wide: wide.filter(isCount) } : {}),
     ...(Array.isArray(shield) ? { shield: shield.filter(isCount) } : {}),
   };
+}
+
+/** `pickups`, or a host on protocol 3 or 4's single `pickup`.  Empty if there are none; null if malformed. */
+function parsePickups(value: Record<string, unknown>): PickupTuple[] | null {
+  const raw: unknown = value.pickups ?? (value.pickup === undefined ? [] : [value.pickup]);
+  if (!Array.isArray(raw) || raw.length > MAX_PICKUPS) return null;
+  const pickups: PickupTuple[] = [];
+  for (const pickup of raw) {
+    if (!isNumberArray(pickup, 4)) return null;
+    const [kind, x, y, ticksLeft] = pickup;
+    if (x === undefined || y === undefined || !(isCount(kind) && kind < PICKUP_KIND_COUNT) || !isCount(ticksLeft)) return null;
+    pickups.push([kind, x, y, ticksLeft]);
+  }
+  return pickups;
 }
 
 /**
