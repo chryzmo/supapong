@@ -14,7 +14,7 @@ import { errorMessage, h, type View } from './ui';
 
 type Screen =
   | { name: 'loading' }
-  | { name: 'pick-name'; current?: Player }
+  | { name: 'pick-name' }
   | { name: 'lobby'; player: Player; notice?: string }
   | { name: 'room'; player: Player; room: SeatedRoom }
   | { name: 'match'; player: Player; start: MatchStart }
@@ -62,7 +62,7 @@ function render(screen: Screen): View {
     case 'loading':
       return { el: h('div', { className: 'panel' }, h('p', {}, 'Loading…')) };
     case 'pick-name':
-      return pickNameScreen(screen.current);
+      return pickNameScreen();
     case 'lobby': {
       const { player, notice } = screen;
       const actions = {
@@ -73,7 +73,6 @@ function render(screen: Screen): View {
         },
         practice: () => show({ name: 'sandbox', back: () => show({ name: 'lobby', player }) }),
         leaderboard: () => show({ name: 'stats', player }),
-        rename: () => show({ name: 'pick-name', current: player }),
         signOut() {
           signOut()
             .then(() => show({ name: 'pick-name' }))
@@ -116,18 +115,16 @@ function render(screen: Screen): View {
   }
 }
 
-function pickNameScreen(current?: Player): View {
+function pickNameScreen(): View {
   const input = h('input', {
     name: 'display_name',
     maxLength: DISPLAY_NAME_MAX,
     autocomplete: 'off',
     required: true,
-    value: current?.displayName ?? '',
   });
   const error = h('p', { className: 'error' });
-  const submit = h('button', { type: 'submit' }, current ? 'Save' : 'Play');
-  // Only a new player signs in, so renaming skips the CAPTCHA.
-  const captcha = !current && captchaSiteKey ? captchaWidget(captchaSiteKey) : undefined;
+  const submit = h('button', { type: 'submit' }, 'Play');
+  const captcha = captchaSiteKey ? captchaWidget(captchaSiteKey) : undefined;
 
   const form = h('form', {}, h('label', {}, 'Display name', input), ...(captcha ? [captcha.el] : []), error, submit);
   form.addEventListener('submit', async (event) => {
@@ -159,7 +156,7 @@ function pickNameScreen(current?: Player): View {
       'div',
       { className: 'panel' },
       h('h1', {}, 'Arena Pong'),
-      h('p', {}, current ? 'Change your display name.' : 'Pick a name to get started. No account needed.'),
+      h('p', {}, 'Pick a name to get started. No account needed.'),
       form,
     ),
     dispose: () => captcha?.dispose(),

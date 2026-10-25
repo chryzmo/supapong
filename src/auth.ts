@@ -41,7 +41,7 @@ export async function fetchPlayer(userId: string): Promise<Player | null> {
 }
 
 /**
- * Creates or renames the player's profile.  RLS only allows writing the row
+ * Saves the player's profile.  RLS only allows writing the row
  * whose id matches auth.uid(), so this can't touch anyone else's profile.
  */
 export async function savePlayer(userId: string, displayName: string): Promise<Player> {

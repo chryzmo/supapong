@@ -17,7 +17,6 @@ export interface LobbyActions {
   enterRoom(roomId: string, seat: number): void;
   practice(): void;
   leaderboard(): void;
-  rename(): void;
   signOut(): void;
 }
 
@@ -135,8 +134,6 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   const unsubscribe = subscribeLobby(() => void refresh());
 
   // Header ---------------------------------------------------------------------
-  const renameButton = h('button', { className: 'secondary', type: 'button' }, 'Change name');
-  renameButton.addEventListener('click', () => actions.rename());
   const signOutButton = h('button', { className: 'secondary', type: 'button' }, 'Sign out');
   signOutButton.addEventListener('click', () => actions.signOut());
   const practiceButton = h('button', { className: 'secondary', type: 'button' }, 'Practice');
@@ -153,7 +150,7 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
       'div',
       { className: 'header' },
       h('h1', {}, `Hi, ${player.displayName}`),
-      h('div', { className: 'row' }, leaderboardButton, feedbackButton, renameButton, signOutButton),
+      h('div', { className: 'row' }, leaderboardButton, feedbackButton, signOutButton),
     ),
     ...(notice ? [h('p', { className: 'notice' }, notice)] : []),
     h('h2', {}, 'Open rooms'),
