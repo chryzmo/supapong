@@ -12,6 +12,14 @@ const MUTED = '#8b91a0';
 const LABEL_FONT = '600 13px system-ui, sans-serif';
 /** Distance from the rim to a label, in CSS pixels. */
 const LABEL_GAP = 18;
+/** Room for a line of label text, and to leave at the canvas's edges, in CSS pixels. */
+const LABEL_LINE = 16;
+const EDGE = 8;
+/** Labels go outside the rim unless that shrinks the board below this share of the most it could be. */
+const OUTSIDE_MIN_SHARE = 0.85;
+/** Labels inside the rim sit this far out from the center (the paddles are at 0.92), and fainter. */
+const INSIDE_LABEL_RADIUS = 0.8;
+const INSIDE_LABEL_ALPHA = 0.6;
 /** Effects and tokens blink for their last this-many ticks, as a warning. */
 const ENDING_TICKS = 2 * TICK_RATE;
 
@@ -47,6 +55,39 @@ export function fitCanvas(canvas: HTMLCanvasElement): { width: number; height: n
   return { width, height };
 }
 
+/** A label to fit around the board: which way it is from the center on screen (a unit vector, y down), and its width. */
+export interface LabelBox {
+  dx: number;
+  dy: number;
+  width: number;
+}
+
+/**
+ * How big the board can be on a `width` by `height` canvas, and whether the
+ * labels go outside the rim.  Outside, each label needs room in its own
+ * direction only: a label at the bottom costs height, not width.  When that
+ * would shrink the board too much (side labels on a narrow screen), the
+ * labels go just inside the rim and the board takes the whole canvas.
+ */
+export function fitBoard(width: number, height: number, labels: readonly LabelBox[]): { radius: number; inside: boolean } {
+  const full = Math.max(40, Math.min(width, height) / 2 - EDGE);
+  let reach = Infinity;
+  for (const { dx, dy, width: w } of labels) {
+    const across = Math.abs(dx);
+    // As drawn: away from the board at the sides, centered on it at the top and bottom.
+    const extent = labelAlign(dx) === 'center' ? w / 2 : w;
+    if (across > 0) reach = Math.min(reach, (width / 2 - EDGE - extent) / across);
+    if (dy !== 0) reach = Math.min(reach, (height / 2 - EDGE - LABEL_LINE / 2) / Math.abs(dy));
+  }
+  const outside = Math.min(full, reach - LABEL_GAP);
+  return outside >= full * OUTSIDE_MIN_SHARE ? { radius: outside, inside: false } : { radius: full, inside: true };
+}
+
+/** A label left of the board grows left, and so on. */
+function labelAlign(dx: number): CanvasTextAlign {
+  return dx < -0.3 ? 'right' : dx > 0.3 ? 'left' : 'center';
+}
+
 export function draw(canvas: HTMLCanvasElement, state: GameState, config: PhysicsConfig, view: RenderView): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -58,17 +99,19 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
   const cx = width / 2;
   const cy = height / 2;
   const labelText = (i: number): string => `${shorten(view.labels[i]?.name ?? '', 10)}  ${state.scores[i] ?? 0}`;
-  ctx.font = LABEL_FONT;
-  const labelWidth = Math.max(0, ...state.gates.map((_, i) => ctx.measureText(labelText(i)).width));
-  // Leave room outside the rim for the labels: their width at the sides,
-  // a line of text at the top and bottom.
-  const R = Math.max(40, Math.min(width / 2 - LABEL_GAP - labelWidth - 8, height / 2 - LABEL_GAP - 20));
   // Rotate the world so the viewer's gate sits at the bottom (world angle -π/2).
   const rotation = view.viewerGate === null ? 0 : -Math.PI / 2 - gateCenter(view.viewerGate, n);
 
   // World angle -> canvas angle.  The world is y-up and counterclockwise; the
   // canvas is y-down, so angles flip sign.
   const screenAngle = (a: number): number => -(a + rotation);
+
+  ctx.font = LABEL_FONT;
+  const labelBoxes = state.gates.map((_, i): LabelBox => {
+    const a = screenAngle(gateCenter(i, n));
+    return { dx: Math.cos(a), dy: Math.sin(a), width: view.labels[i] ? ctx.measureText(labelText(i)).width : 0 };
+  });
+  const { radius: R, inside: labelsInside } = fitBoard(width, height, labelBoxes);
   const toScreen = (x: number, y: number): [number, number] => {
     const c = Math.cos(rotation);
     const s = Math.sin(rotation);
@@ -79,6 +122,29 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.beginPath();
     ctx.arc(cx, cy, r * R, screenAngle(a1), screenAngle(a2), true);
     ctx.stroke();
+  };
+
+  /**
+   * Names and scores by each gate, kept upright.  Outside the rim they grow
+   * away from the board (left of it on the left side, and so on); inside,
+   * toward the middle.
+   */
+  const drawLabels = (): void => {
+    ctx.textBaseline = 'middle';
+    ctx.font = LABEL_FONT;
+    const r = labelsInside ? INSIDE_LABEL_RADIUS : 1 + LABEL_GAP / R;
+    for (let i = 0; i < n; i++) {
+      const label = view.labels[i];
+      if (!label) continue;
+      const center = gateCenter(i, n);
+      const [lx, ly] = toScreen(Math.cos(center) * r, Math.sin(center) * r);
+      const { dx } = labelBoxes[i]!;
+      ctx.textAlign = labelAlign(labelsInside ? -dx : dx);
+      ctx.globalAlpha = (state.gates[i]!.active ? 1 : 0.4) * (labelsInside ? INSIDE_LABEL_ALPHA : 1);
+      ctx.fillStyle = label.color;
+      ctx.fillText(labelText(i), lx, ly);
+    }
+    ctx.globalAlpha = 1;
   };
 
   ctx.fillStyle = BACKGROUND;
@@ -144,6 +210,9 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.shadowBlur = 0;
   });
 
+  // Inside the rim, the labels go under the tokens and balls.
+  if (labelsInside) drawLabels();
+
   for (const pickup of state.pickups ?? []) {
     if (blinkOff(pickup.ticksLeft)) continue;
     const [px, py] = toScreen(pickup.x, pickup.y);
@@ -166,22 +235,7 @@ export function draw(canvas: HTMLCanvasElement, state: GameState, config: Physic
     ctx.shadowBlur = 0;
   }
 
-  // Names and scores outside each gate, kept upright.
-  // Labels grow away from the board: left of it on the left side, and so on.
-  ctx.textBaseline = 'middle';
-  ctx.font = LABEL_FONT;
-  for (let i = 0; i < n; i++) {
-    const label = view.labels[i];
-    if (!label) continue;
-    const center = gateCenter(i, n);
-    const [lx, ly] = toScreen(Math.cos(center) * (1 + LABEL_GAP / R), Math.sin(center) * (1 + LABEL_GAP / R));
-    const side = (lx - cx) / R;
-    ctx.textAlign = side < -0.3 ? 'right' : side > 0.3 ? 'left' : 'center';
-    ctx.globalAlpha = state.gates[i]!.active ? 1 : 0.4;
-    ctx.fillStyle = label.color;
-    ctx.fillText(labelText(i), lx, ly);
-    ctx.globalAlpha = 1;
-  }
+  if (!labelsInside) drawLabels();
   ctx.textAlign = 'center';
 
   if (view.centerText) {
