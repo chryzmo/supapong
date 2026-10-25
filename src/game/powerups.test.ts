@@ -35,6 +35,14 @@ const radial = (angle: number, lastTouch = -1, rally = 0) =>
 
 const token = (kind: Pickup['kind'], x: number, y: number): Pickup => ({ kind, x, y, ticksLeft: seconds(10) });
 
+/** As many tokens as the board holds, around the left half, clear of a ball heading right from the center. */
+function fullBoard(): Pickup[] {
+  return Array.from({ length: config.pickupMax }, (_, i) => {
+    const angle = Math.PI / 2 + (Math.PI * (i + 0.5)) / config.pickupMax;
+    return token('wide', 0.5 * Math.cos(angle), 0.5 * Math.sin(angle));
+  });
+}
+
 function run(state: GameState, ticks: number, until?: (e: PhysicsEvent) => boolean, c: PhysicsConfig = config) {
   const events: PhysicsEvent[] = [];
   for (let i = 0; i < ticks; i++) {
@@ -93,10 +101,10 @@ describe('spawning', () => {
   });
 
   it('runs the timer only while a ball is in play and the board has room', () => {
-    const full = [token('wide', -0.5, 0), token('shield', 0, 0.5), token('multiball', 0, -0.5)];
+    const full = fullBoard();
     const busy = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickups: full }), 3).state;
     expect(busy.pickupTimer).toBe(5);
-    const room = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickups: full.slice(0, 2) }), 3).state;
+    const room = run(inPlay([ball(0, 0, 0.01, 0)], { pickupTimer: 5, pickups: full.slice(1) }), 3).state;
     expect(room.pickupTimer).toBe(2);
     const waiting = run({ ...inPlay([ball(0, 0, 0, 0)], { pickupTimer: 5 }), respawnTicks: 30 }, 3).state;
     expect(waiting.pickupTimer).toBe(5);
@@ -115,10 +123,9 @@ describe('spawning', () => {
     expect(another.state.pickups).toHaveLength(2);
     expect(another.state.pickups![0]).toMatchObject({ kind: 'shield', x: -0.5, y: 0.1 });
 
-    const full = [out, token('wide', 0, 0.5), token('wide', 0, -0.5)];
-    const busy = run(inPlay([radial(0, 1, 5)], { pickups: full }), 300, (e) => e.type === 'hit');
+    const busy = run(inPlay([radial(0, 1, 5)], { pickups: fullBoard() }), 300, (e) => e.type === 'hit');
     expect(busy.events.some((e) => e.type === 'spawn')).toBe(false);
-    expect(busy.state.pickups).toHaveLength(3);
+    expect(busy.state.pickups).toHaveLength(config.pickupMax);
   });
 
   it('keeps tokens clear of each other', () => {
@@ -228,13 +235,26 @@ describe('shield', () => {
 describe('multiball', () => {
   const onTheWay = token('multiball', 0.3, 0);
 
-  it('splits the ball into three, heading 20° apart', () => {
+  it('splits the ball into three where it is: the old one keeps going, the new ones go at its speed', () => {
     const { state } = run(inPlay([radial(0, 2)], { pickups: [onTheWay] }), 60, (e) => e.type === 'pickup');
     expect(state.balls).toHaveLength(3);
-    const headings = state.balls.map((b) => Math.atan2(b.vy, b.vx));
-    expect(headings[1]! - headings[0]!).toBeCloseTo((20 * Math.PI) / 180);
-    expect(headings[2]! - headings[0]!).toBeCloseTo((-20 * Math.PI) / 180);
-    expect(state.balls.every((b) => b.lastTouch === 2 && b.x === state.balls[0]!.x)).toBe(true);
+    const [old, ...added] = state.balls;
+    expect(Math.atan2(old!.vy, old!.vx)).toBeCloseTo(0);
+    for (const b of added) {
+      expect(Math.hypot(b.vx, b.vy)).toBeCloseTo(Math.hypot(old!.vx, old!.vy));
+      expect(b).toMatchObject({ x: old!.x, y: old!.y, lastTouch: 2 });
+    }
+  });
+
+  it('sends the new balls a random way, whatever the old one was doing, the same from the same seed', () => {
+    const split = (seed: number) =>
+      run({ ...inPlay([radial(0, 2)], { pickups: [onTheWay] }), seed }, 60, (e) => e.type === 'pickup').state.balls.slice(1);
+    expect(split(3)).toEqual(split(3));
+    const headings = Array.from({ length: 100 }, (_, seed) => split(seed).map((b) => Math.atan2(b.vy, b.vx))).flat();
+    // The old ball heads along +x.  New ones go every way, back toward -x too.
+    expect(headings.some((h) => Math.abs(h) > (3 * Math.PI) / 4)).toBe(true);
+    expect(headings.some((h) => h > Math.PI / 4 && h < (3 * Math.PI) / 4)).toBe(true);
+    expect(headings.some((h) => h < -Math.PI / 4 && h > (-3 * Math.PI) / 4)).toBe(true);
   });
 
   it('gives a wide paddle instead when the board already has the most balls', () => {

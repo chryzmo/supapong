@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMobileBrowser, type BrowserTraits } from './touch';
+import { fullscreenOnFirstPress, isMobileBrowser, type BrowserTraits } from './touch';
 
 const desktop: BrowserTraits = {
   userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
@@ -40,5 +40,75 @@ describe('isMobileBrowser', () => {
   it('lets ?touch=1 and ?touch=0 force the answer', () => {
     expect(isMobileBrowser({ ...desktop, override: '1' })).toBe(true);
     expect(isMobileBrowser({ ...desktop, uaMobile: true, override: '0' })).toBe(false);
+  });
+});
+
+describe('fullscreenOnFirstPress', () => {
+  function fakeDocument(enabled = true) {
+    const doc = {
+      fullscreenEnabled: enabled,
+      fullscreenElement: null as unknown,
+      requests: [] as (FullscreenOptions | undefined)[],
+      exits: 0,
+      documentElement: {
+        requestFullscreen(options?: FullscreenOptions): Promise<void> {
+          doc.requests.push(options);
+          doc.fullscreenElement = doc.documentElement;
+          return Promise.resolve();
+        },
+      },
+      exitFullscreen(): Promise<void> {
+        doc.exits++;
+        doc.fullscreenElement = null;
+        return Promise.resolve();
+      },
+    };
+    return doc;
+  }
+  const press = (el: EventTarget) => el.dispatchEvent(new Event('pointerdown'));
+
+  it('goes full screen on the first press only, hiding the browser UI, and leaves it when disposed', () => {
+    const doc = fakeDocument();
+    const el = new EventTarget();
+    const dispose = fullscreenOnFirstPress(el, doc);
+    expect(doc.requests).toEqual([]);
+    press(el);
+    press(el);
+    expect(doc.requests).toEqual([{ navigationUI: 'hide' }]);
+    dispose();
+    expect(doc.exits).toBe(1);
+  });
+
+  it('stays out once the player has left full screen', () => {
+    const doc = fakeDocument();
+    const el = new EventTarget();
+    const dispose = fullscreenOnFirstPress(el, doc);
+    press(el);
+    doc.fullscreenElement = null;
+    press(el);
+    dispose();
+    expect(doc.requests).toHaveLength(1);
+    expect(doc.exits).toBe(0);
+  });
+
+  it('does nothing where full screen is not supported', () => {
+    const doc = fakeDocument(false);
+    const el = new EventTarget();
+    const dispose = fullscreenOnFirstPress(el, doc);
+    press(el);
+    dispose();
+    expect(doc.requests).toEqual([]);
+    expect(doc.exits).toBe(0);
+  });
+
+  it("doesn't leave a full screen it didn't enter", () => {
+    const doc = fakeDocument();
+    doc.fullscreenElement = doc.documentElement;
+    const el = new EventTarget();
+    const dispose = fullscreenOnFirstPress(el, doc);
+    press(el);
+    dispose();
+    expect(doc.requests).toEqual([]);
+    expect(doc.exits).toBe(0);
   });
 });

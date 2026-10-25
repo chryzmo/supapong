@@ -8,8 +8,8 @@ import { hudParts } from '../game/hud';
 import { startFrames } from '../game/loop';
 import { DEFAULT_CONFIG, TICK_RATE, type GameState } from '../game/physics';
 import { SEAT_COLORS, draw, type RenderView } from '../game/render';
-import { onMobileBrowser, touchControls } from '../game/touch';
-import { oneTokenRules, type MatchStart } from '../types';
+import { fullscreenOnFirstPress, onMobileBrowser, touchControls } from '../game/touch';
+import { olderHostRules, type MatchStart } from '../types';
 import { h, type View } from '../ui';
 import type { RoomSession } from './session';
 import { scoresByPlayer, type MatchResult } from './standings';
@@ -26,7 +26,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     goalLimit: start.goalLimit ?? Infinity,
     matchDuration: start.matchSeconds ?? Infinity,
     powerUps: start.powerUps,
-    ...(oneTokenRules(start) ? { pickupMax: 1, pickupLifetime: 10 } : {}),
+    ...olderHostRules(start),
   };
   const { room, player, isHost } = session;
   const myGate = gates.findIndex((gate) => gate.playerId === player.id);
@@ -105,24 +105,30 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     return view;
   }
 
+  const mobile = onMobileBrowser();
   // Spectators have no paddle, so they get no buttons.
-  const touch = onMobileBrowser() && myGate >= 0;
+  const touch = mobile && myGate >= 0;
+
+  const el = h(
+    'div',
+    { className: 'stage single' },
+    h(
+      'div',
+      { className: touch ? 'stage-main touch' : 'stage-main' },
+      canvas,
+      ...(touch ? [touchControls(input)] : []),
+      hud,
+      h('p', { className: 'muted' }, touch ? 'Hold ◀ ▶ to move' : '← → or A D to move'),
+      h('div', { className: 'row' }, leave),
+    ),
+  );
+  // On a phone the address bar takes room the board could use.
+  const leaveFullscreen = mobile ? fullscreenOnFirstPress(el) : undefined;
 
   return {
-    el: h(
-      'div',
-      { className: 'stage single' },
-      h(
-        'div',
-        { className: touch ? 'stage-main touch' : 'stage-main' },
-        canvas,
-        ...(touch ? [touchControls(input)] : []),
-        hud,
-        h('p', { className: 'muted' }, touch ? 'Hold ◀ ▶ to move' : '← → or A D to move'),
-        h('div', { className: 'row' }, leave),
-      ),
-    ),
+    el,
     dispose() {
+      leaveFullscreen?.();
       clearTimeout(resultsTimer);
       stopFrames();
       input.dispose();

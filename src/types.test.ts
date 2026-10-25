@@ -5,7 +5,7 @@ import {
   ROOM_NAME_MAX,
   describeMatchEnd,
   matchProtocol,
-  oneTokenRules,
+  olderHostRules,
   parseInputMessage,
   parseRoomEvent,
   parseRosterEntry,
@@ -283,20 +283,24 @@ describe('describeMatchEnd', () => {
 });
 
 describe('matchProtocol', () => {
-  it('asks only as new a guest as the match needs', () => {
-    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 120 })).toBe(2);
-    expect(matchProtocol({ powerUps: true, goalLimit: 10, matchSeconds: 120 })).toBe(5);
-    expect(matchProtocol({ powerUps: true, goalLimit: null, matchSeconds: 600 })).toBe(5);
-    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 300 })).toBe(4);
-    expect(matchProtocol({ powerUps: false, goalLimit: null, matchSeconds: 120 })).toBe(4);
+  it('asks for protocol 6 for every match, since the board changed', () => {
+    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 120 })).toBe(6);
+    expect(matchProtocol({ powerUps: true, goalLimit: null, matchSeconds: 600 })).toBe(6);
   });
 });
 
-describe('oneTokenRules', () => {
-  it('applies only to power-ups matches started by a host on protocol 3 or 4', () => {
-    expect(oneTokenRules({ powerUps: true, protocol: 3 })).toBe(true);
-    expect(oneTokenRules({ powerUps: true, protocol: 4 })).toBe(true);
-    expect(oneTokenRules({ powerUps: true, protocol: 5 })).toBe(false);
-    expect(oneTokenRules({ powerUps: false, protocol: 2 })).toBe(false);
+describe('olderHostRules', () => {
+  it('changes nothing for a host on protocol 6', () => {
+    expect(olderHostRules({ powerUps: true, protocol: 6 })).toEqual({});
+  });
+
+  it("plays an older host's board: wider gates, no overhang, 3 tokens", () => {
+    expect(olderHostRules({ powerUps: true, protocol: 5 })).toEqual({ gateFraction: 0.8, paddleOverhang: 0, pickupMax: 3 });
+    expect(olderHostRules({ powerUps: false, protocol: 2 })).toMatchObject({ gateFraction: 0.8, paddleOverhang: 0 });
+  });
+
+  it('plays one token at a time, for 10 s, in a power-ups match from a host on protocol 3 or 4', () => {
+    expect(olderHostRules({ powerUps: true, protocol: 3 })).toMatchObject({ pickupMax: 1, pickupLifetime: 10 });
+    expect(olderHostRules({ powerUps: true, protocol: 4 })).toMatchObject({ pickupMax: 1, pickupLifetime: 10 });
   });
 });

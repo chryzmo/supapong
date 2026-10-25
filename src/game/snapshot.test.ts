@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseStateMessage } from '../types';
 import { botInput } from './bot';
+import { SNAPSHOT_EVERY } from './host';
 import { interpolate } from './interpolate';
 import { DEFAULT_CONFIG, DT, createGame, step, type Dir, type GameState } from './physics';
 import { INTERP_DELAY_MS, MAX_EXTRAPOLATE_TICKS, SnapshotBuffer, decodeState, encodeState } from './snapshot';
@@ -65,12 +66,12 @@ describe('encodeState / decodeState', () => {
         scores: Array(8).fill(10),
         goals: 25,
         balls: [ball, ball, ball],
-        pickups: Array(3).fill({ kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 1200 }),
+        pickups: Array(DEFAULT_CONFIG.pickupMax).fill({ kind: 'multiball', x: -0.612345, y: 0.512345, ticksLeft: 1200 }),
         pickupTimer: 720,
         seed: 4294967295,
       }),
     );
-    expect(json.length).toBeLessThan(550);
+    expect(json.length).toBeLessThan(650);
   });
 
   it('stays small', () => {
@@ -164,23 +165,36 @@ describe('SnapshotBuffer', () => {
       const tick = Math.floor(at);
       const truth = interpolate(host[tick - 1]!, host[tick]!, at - tick);
       expect(drawn.balls.length).toBe(truth.balls.length);
+      let slipped = false;
       drawn.balls.forEach((b, i) => {
         const d = Math.hypot(b.x - truth.balls[i]!.x, b.y - truth.balls[i]!.y);
         worst = Math.max(worst, d);
         drawnBalls++;
         if (d > 0.01) off++;
+        // A hit the replay missed shows at once in the rally, before the ball is far off.
+        if (d > 0.01 || b.rally !== truth.balls[i]!.rally) slipped = true;
       });
-      expect(drawn.pickups?.map((p) => p.kind)).toEqual(truth.pickups?.map((p) => p.kind));
+      // A ball that slipped past a paddle edge (below) also misses what the
+      // hit would have done, like a volley's token, until the next snapshot.
+      if (slipped) continue;
+      // Exactly on a tick, the tokens may be that tick's or the next's: a
+      // snapshot is drawn as it is, while interpolate() takes them from the
+      // later state.  Either is right to within a tick.
+      const kinds = (state: GameState) => state.pickups?.map((p) => p.kind);
+      expect([kinds(truth), ...(at === tick ? [kinds(host[tick - 1]!)] : [])]).toContainEqual(kinds(drawn));
       expect(drawn.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0])).toEqual(truth.gates.map((g) => [g.wideTicks ?? 0, g.shieldTicks ?? 0]));
     }
     // The replay blends paddles between snapshots, so a ball that only just
     // caught a paddle's edge on the host can slip past it in the replay, for
     // a frame or two until the next snapshot.  Hard bots aiming for tokens
-    // hit near the edge a lot, more so with three tokens out.  Measured: four
-    // drawn balls in about 7,400 off by more than 0.01 (by up to 0.068).
-    // Otherwise within 0.004, the same as without power-ups.
+    // hit near the edge a lot, more so the more tokens are out.  Measured
+    // with 6 tokens: four drawn balls in about 9,400 off by more than 0.01
+    // (by up to 0.16).  Otherwise within 0.004, the same as without
+    // power-ups.  The share is what matters.  The worst moves with tuning, so
+    // it's bounded by how far a slipped ball can get before the next snapshot
+    // puts it right: one going out instead of back, at top speed.
     expect(off / drawnBalls).toBeLessThan(0.001);
-    expect(worst).toBeLessThan(0.08);
+    expect(worst).toBeLessThan(2 * config.maxSpeed * SNAPSHOT_EVERY * DT);
   });
 
   it('runs the physics on when the next snapshot is late, for at most MAX_EXTRAPOLATE_TICKS', () => {

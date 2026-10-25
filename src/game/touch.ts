@@ -44,6 +44,42 @@ export function onMobileBrowser(): boolean {
   });
 }
 
+/** The parts of `document` that full screen needs, so it can be tested without a browser. */
+export interface FullscreenDocument {
+  readonly fullscreenEnabled: boolean;
+  readonly fullscreenElement: unknown;
+  readonly documentElement: { requestFullscreen(options?: FullscreenOptions): Promise<void> };
+  exitFullscreen(): Promise<void>;
+}
+
+/**
+ * Goes full screen on the first press anywhere in `el`, hiding the browser's
+ * address bar.  Browsers only allow it from a user gesture, and a guest's
+ * match starts from a message, not a tap, so it waits for one.  Only once: a
+ * player who leaves full screen stays out.  Where it isn't supported (an
+ * iPhone's Safari), it does nothing.
+ * @returns Stops listening, and leaves full screen if this entered it.
+ */
+export function fullscreenOnFirstPress(el: EventTarget, doc: FullscreenDocument = document): () => void {
+  let pressed = false;
+  let entered = false;
+  const onPress = (): void => {
+    if (pressed) return;
+    pressed = true;
+    el.removeEventListener('pointerdown', onPress, true);
+    if (!doc.fullscreenEnabled || doc.fullscreenElement) return;
+    entered = true;
+    doc.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {
+      entered = false;
+    });
+  };
+  el.addEventListener('pointerdown', onPress, true);
+  return () => {
+    el.removeEventListener('pointerdown', onPress, true);
+    if (entered && doc.fullscreenElement) doc.exitFullscreen().catch(() => undefined);
+  };
+}
+
 /**
  * Two hold-to-move buttons, left and right on screen, like ← and →.  Each
  * tracks its own pointers, so a second finger on the same button, or one

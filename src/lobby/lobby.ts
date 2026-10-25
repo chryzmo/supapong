@@ -1,6 +1,4 @@
 import {
-  DEFAULT_GOAL_LIMIT,
-  GOAL_LIMIT_CHOICES,
   MAX_PLAYERS,
   MIN_PLAYERS,
   ROOM_NAME_MAX,
@@ -51,10 +49,6 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
   for (let n = MIN_PLAYERS; n <= MAX_PLAYERS; n++) {
     sizeSelect.append(h('option', { value: String(n), selected: n === 4 }, `${n} players`));
   }
-  const goalsSelect = h('select', { name: 'goal_limit' });
-  for (const n of GOAL_LIMIT_CHOICES) {
-    goalsSelect.append(h('option', { value: String(n), selected: n === DEFAULT_GOAL_LIMIT }, `${n} goals`));
-  }
   const powerUpsToggle = h('input', { type: 'checkbox', name: 'power_ups', checked: true });
   const createButton = h('button', { type: 'submit' }, 'Create room');
   const createForm = h(
@@ -62,7 +56,6 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     { className: 'create' },
     h('label', {}, 'Room name', nameInput),
     h('label', {}, 'Size', sizeSelect),
-    h('label', {}, 'Match ends after', goalsSelect),
     h('label', { className: 'check', title: 'Tokens on the board: wide paddle, shield, multiball' }, powerUpsToggle, 'Power-ups'),
     createButton,
   );
@@ -76,7 +69,8 @@ export function lobbyScreen(player: Player, actions: LobbyActions, notice?: stri
     void run(async () => {
       createButton.disabled = true;
       try {
-        const roomId = await createRoom(result.value, Number(sizeSelect.value), Number(goalsSelect.value), powerUpsToggle.checked);
+        // The goal limit and length start at their defaults; the host changes them in the waiting room.
+        const roomId = await createRoom(result.value, Number(sizeSelect.value), undefined, powerUpsToggle.checked);
         actions.enterRoom(roomId, 0);
       } finally {
         createButton.disabled = false;

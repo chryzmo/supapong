@@ -77,7 +77,8 @@ describe('geometry', () => {
     for (const n of [2, 3, 8]) {
       expect(2 * gateHalfWidth(n, config)).toBeCloseTo(config.gateFraction * (2 * Math.PI / n));
       expect(paddleHalfWidth(n, config)).toBeCloseTo(gateHalfWidth(n, config) * config.paddleFraction);
-      expect(paddleTravel(n, config) + paddleHalfWidth(n, config)).toBeCloseTo(gateHalfWidth(n, config));
+      // At the end of its travel, the paddle reaches paddleOverhang of its half-width past the gate's end.
+      expect(paddleTravel(n, config) + paddleHalfWidth(n, config)).toBeCloseTo(gateHalfWidth(n, config) + paddleHalfWidth(n, config) * config.paddleOverhang);
     }
   });
 
@@ -201,15 +202,41 @@ describe('paddles', () => {
     expect(cw).toBeCloseTo(-perTick);
   });
 
-  it('stay inside their own gate', () => {
+  it('stop a little past the end of their own gate', () => {
     for (const dir of [1, -1] as const) {
       const { state } = run(createGame(4, 1, config), [dir, dir, dir, dir], 600);
       state.gates.forEach((gate, i) => {
         const offset = angleDiff(gate.paddle, gateCenter(i, 4));
         expect(Math.abs(offset)).toBeCloseTo(paddleTravel(4, config));
         expect(Math.sign(offset)).toBe(dir);
+        // The far end overhangs the gate by paddleOverhang of the half-width.
+        const farEnd = Math.abs(offset) + paddleHalfWidth(4, config);
+        expect(farEnd - gateHalfWidth(4, config)).toBeCloseTo(paddleHalfWidth(4, config) * config.paddleOverhang);
       });
     }
+  });
+
+  it('cover the corner where a ball crosses the paddle line outside the gate and drifts in', () => {
+    // A shallow shot along the rim: it crosses the paddle line past the end
+    // of gate 0, then reaches the rim inside it.
+    const shot = (c: PhysicsConfig) => {
+      const end = gateHalfWidth(4, c);
+      const [fromX, fromY] = [0.8 * Math.cos(end + 0.15), 0.8 * Math.sin(end + 0.15)];
+      const [toX, toY] = [Math.cos(end - 0.02), Math.sin(end - 0.02)];
+      const length = Math.hypot(toX - fromX, toY - fromY);
+      let state = touchedBy(inPlay(4, fromX, fromY, ((toX - fromX) / length) * c.launchSpeed, ((toY - fromY) / length) * c.launchSpeed), 2);
+      // Gate 0's paddle as far toward the ball as it goes.
+      state = { ...state, gates: state.gates.map((g, i) => (i === 0 ? { ...g, paddle: paddleTravel(4, c) } : g)) };
+      const events: PhysicsEvent[] = [];
+      for (let t = 0; t < 120 && !events.some((e) => e.type === 'hit' || e.type === 'goal'); t++) {
+        const result = step(state, [], c);
+        state = result.state;
+        events.push(...result.events);
+      }
+      return events.find((e) => e.type === 'hit' || e.type === 'goal')?.type;
+    };
+    expect(shot({ ...config, paddleOverhang: 0 })).toBe('goal');
+    expect(shot(config)).toBe('hit');
   });
 
   it('ignore input for inactive gates', () => {

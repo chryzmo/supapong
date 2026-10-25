@@ -189,16 +189,16 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 5, powerUps: true }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true }]);
     }
   });
 
-  it("tells guests a classic room's match has no power-ups, and that older code can play it", async () => {
+  it("tells guests a classic room's match has no power-ups", async () => {
     const { host, guests } = await setup(1, false);
     const start = await host.session.startMatch();
-    expect(start).toMatchObject({ powerUps: false, protocol: 2 });
+    expect(start).toMatchObject({ powerUps: false, protocol: 6 });
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events[0]).toMatchObject({ type: 'start', powerUps: false, protocol: 2 });
+    expect(guests[0]!.events[0]).toMatchObject({ type: 'start', powerUps: false, protocol: 6 });
   });
 
   it('starts with the settings the host chose in the waiting room, and tells guests as they change', async () => {
@@ -213,9 +213,9 @@ describe('startMatch', () => {
     expect(data).toEqual({ goal_limit: null, match_seconds: 300, power_ups: true });
 
     const start = await host.session.startMatch();
-    expect(start).toMatchObject({ ...settings, protocol: 5 });
+    expect(start).toMatchObject({ ...settings, protocol: 6 });
     await waitFor(() => guests[0]!.events.some((e) => e.type === 'start'), 'the start event');
-    expect(guests[0]!.events.at(-1)).toMatchObject({ type: 'start', ...settings, protocol: 5 });
+    expect(guests[0]!.events.at(-1)).toMatchObject({ type: 'start', ...settings, protocol: 6 });
   });
 
   it("won't let a guest change the settings", async () => {
@@ -234,7 +234,7 @@ describe('startMatch', () => {
     ]);
     expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 5, powerUps: true }]);
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true }]);
   });
 
   it('adds bots past the room size, up to 8 gates', async () => {

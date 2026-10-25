@@ -201,10 +201,14 @@ describe('collected', () => {
     let seen = 0;
     for (let t = 0; t < 60 * 120; t++) {
       const result = step(state, state.gates.map((_, i) => botInput(state, i, powered, 0.9)), powered);
-      const fromPhysics = result.events.flatMap((e) =>
+      const events = result.events.flatMap((e) =>
         e.type === 'pickup' && e.gate >= 0 ? [{ gate: e.gate, kind: e.kind === 'multiball' && result.state.balls.length <= state.balls.length ? 'wide' : e.kind }] : [],
       );
-      expect(collected(state, result.state)).toEqual(fromPhysics);
+      // Two of the same kind for the same gate in one tick read as one: the
+      // effect's time only goes up once.  The announcement would be the same.
+      const fromPhysics = events.filter((c, i) => events.findIndex((d) => d.gate === c.gate && d.kind === c.kind) === i);
+      const order = (list: { gate: number; kind: string }[]) => list.map((c) => `${c.gate}:${c.kind}`).sort();
+      expect(order(collected(state, result.state))).toEqual(order(fromPhysics));
       seen += fromPhysics.length;
       state = result.state;
     }

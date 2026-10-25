@@ -14,7 +14,11 @@ export interface Collected {
   kind: PickupKind;
 }
 
-/** What got collected between drawing `prev` and `next`. */
+/**
+ * What got collected between drawing `prev` and `next`.  Two tokens of the
+ * same kind for the same gate in one tick look like one; they'd announce
+ * the same anyway.
+ */
 export function collected(prev: GameState, next: GameState): Collected[] {
   const found: Collected[] = [];
   next.gates.forEach((gate, i) => {

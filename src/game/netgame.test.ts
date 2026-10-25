@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Gate, RoomEvent, StateMessage } from '../types';
 import { ClientGame, RESEND_MS } from './client';
 import { ADOPT_BURST_SECONDS, CLAIM_WINDOW_TICKS, COUNTDOWN_SECONDS, HostGame, SNAPSHOT_EVERY } from './host';
-import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleReach, paddleTravel, type GameState, type PhysicsConfig } from './physics';
+import { DEFAULT_CONFIG, DT, TICK_RATE, createGame, gateCenter, gateHalfWidth, paddleHalfWidth, paddleReach, paddleTravel, type GameState, type PhysicsConfig } from './physics';
 import { INTERP_DELAY_MS } from './snapshot';
 
 const TICK_MS = DT * 1000;
@@ -204,7 +204,7 @@ describe('HostGame saves', () => {
       ...game,
       respawnTicks: 0,
       balls: [{ x: 0, y: 0, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, lastTouch: gate === 2 ? 0 : 2, rally: 0 }],
-      gates: game.gates.map((g, i) => (i === gate ? { ...g, paddle: angle + paddleTravel(3, config) } : g)),
+      gates: game.gates.map((g, i) => (i === gate ? { ...g, paddle: angle + gateHalfWidth(3, config) - paddleHalfWidth(3, config) } : g)),
     };
   }
   const goals = (events: RoomEvent[]) => events.filter((e) => e.type === 'goal');

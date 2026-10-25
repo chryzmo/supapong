@@ -1,5 +1,5 @@
 // Shared app types, plus parsers for messages that arrive over Realtime.
-import type { Dir } from './game/physics';
+import type { Dir, PhysicsConfig } from './game/physics';
 
 export const DISPLAY_NAME_MAX = 24;
 export const ROOM_NAME_MAX = 32;
@@ -7,26 +7,31 @@ export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 8;
 /**
  * The version of the match messages this code speaks.  2: snapshots carry
- * `balls`.  3: power-ups.  4: match lengths and "no limit".  5: up to 3
- * tokens on the board at once, as `pickups`.  The host's
- * `start` says the oldest version that can play that match (matchProtocol),
- * so a guest on older code knows to reload, and only when it has to.
+ * `balls`.  3: power-ups.  4: match lengths and "no limit".  5: several
+ * tokens on the board at once, as `pickups`.  6: smaller gates, paddles that
+ * overhang them, and up to 6 tokens.  The host's `start` says the oldest
+ * version that can play that match (matchProtocol), so a guest on older
+ * code knows to reload, and only when it has to.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
-/** The oldest PROTOCOL_VERSION that can play a match. */
-export function matchProtocol(match: MatchSettings): number {
-  if (match.powerUps) return 5;
-  return match.goalLimit === null || match.matchSeconds !== DEFAULT_MATCH_SECONDS ? 4 : 2;
+/** The oldest PROTOCOL_VERSION that can play a match.  Every match since 6: the board itself changed. */
+export function matchProtocol(_match: MatchSettings): number {
+  return 6;
 }
 
 /**
- * Whether a power-ups match keeps the rules from before protocol 5: one
- * token at a time, lasting 10 s.  A host on older code says 3 or 4 in its
- * `start`, and its guests have to replay the physics the way it runs them.
+ * The physics a host on older code plays, which says so with an older
+ * `protocol` in its `start`.  Its guests have to replay the physics the way
+ * it runs it.  Before 6: wider gates, paddles that stop at the gate's end,
+ * and 3 tokens.  Before 5: one token at a time, lasting 10 s.  (Older hosts
+ * also split a multiball ±20°, which no setting brings back; the snapshots
+ * put the balls right within 50 ms.)
  */
-export function oneTokenRules(start: Pick<MatchStart, 'powerUps' | 'protocol'>): boolean {
-  return start.powerUps && start.protocol < 5;
+export function olderHostRules(start: Pick<MatchStart, 'powerUps' | 'protocol'>): Partial<PhysicsConfig> {
+  if (start.protocol >= 6) return {};
+  const geometry = { gateFraction: 0.8, paddleOverhang: 0 };
+  return start.powerUps && start.protocol < 5 ? { ...geometry, pickupMax: 1, pickupLifetime: 10 } : { ...geometry, pickupMax: 3 };
 }
 /** How many kinds of token there are (PICKUP_KINDS in physics.ts). */
 const PICKUP_KIND_COUNT = 3;

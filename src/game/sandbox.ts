@@ -44,6 +44,7 @@ const SLIDERS: Slider[] = [
   { key: 'minRadialShare', label: 'Min bounce-back angle', min: 0, max: 0.9, step: 0.05 },
   { key: 'wallJitter', label: 'Wall bounce jitter (rad)', min: 0, max: 0.5, step: 0.01 },
   { key: 'gateFraction', label: 'Gate size (share of sector)', min: 0.2, max: 1, step: 0.02 },
+  { key: 'paddleOverhang', label: 'Paddle past gate end (share of half-width)', min: 0, max: 1, step: 0.05 },
   { key: 'ballRadius', label: 'Ball size', min: 0.01, max: 0.06, step: 0.002 },
 ];
 
@@ -52,7 +53,7 @@ const POWER_UP_SLIDERS: Slider[] = [
   { key: 'pickupMinSeconds', label: 'Token timer, shortest (s)', min: 1, max: 30, step: 1 },
   { key: 'pickupMaxSeconds', label: 'Token timer, longest (s)', min: 1, max: 30, step: 1 },
   { key: 'pickupLifetime', label: 'Token lasts (s)', min: 2, max: 30, step: 1 },
-  { key: 'pickupMax', label: 'Tokens on the board at once', min: 1, max: 5, step: 1 },
+  { key: 'pickupMax', label: 'Tokens on the board at once', min: 1, max: 8, step: 1 },
   { key: 'wideFactor', label: 'Wide paddle size (×)', min: 1, max: 3, step: 0.1 },
   { key: 'wideDuration', label: 'Wide paddle lasts (s)', min: 1, max: 20, step: 1 },
   { key: 'shieldDuration', label: 'Shield lasts (s)', min: 1, max: 30, step: 1 },

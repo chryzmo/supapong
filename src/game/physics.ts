@@ -37,6 +37,13 @@ export interface PhysicsConfig {
    * saving it.  A little jitter knocks it off that line.
    */
   wallJitter: number;
+  /**
+   * How far a paddle may slide past the end of its gate, as a share of its
+   * half-width.  A ball crossing the paddle line just outside the gate can
+   * still drift into it before reaching the rim; this lets the paddle cover
+   * that corner.
+   */
+  paddleOverhang: number;
   /** Seconds the ball waits at the center before (re)launching. */
   respawnDelay: number;
   /** Seconds the match lasts.  Infinity for no time limit. */
@@ -69,7 +76,7 @@ export interface PhysicsConfig {
 }
 
 export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
-  gateFraction: 0.8,
+  gateFraction: 0.72,
   paddleRadius: 0.92,
   paddleFraction: 0.22,
   paddleSpeed: 1.05,
@@ -80,6 +87,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   english: 0.6,
   minRadialShare: 0.4,
   wallJitter: 0.09,
+  paddleOverhang: 0.3,
   respawnDelay: 1.2,
   matchDuration: 120,
   goalLimit: 10,
@@ -89,7 +97,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   pickupMaxSeconds: 12,
   pickupLifetime: 20,
   pickupRadius: 0.06,
-  pickupMax: 3,
+  pickupMax: 6,
   wideFactor: 1.6,
   wideDuration: 8,
   shieldDuration: 15,
@@ -109,8 +117,6 @@ const PICKUP_MAX_RADIUS = 0.65;
 const PICKUP_PLACE_TRIES = 4;
 /** How far apart two tokens' centers should be, in token radii, so they don't overlap. */
 const PICKUP_SPACING = 3;
-/** How far either way the two new balls of a multiball head from the old one. */
-const MULTIBALL_SPREAD = (20 * Math.PI) / 180;
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -228,9 +234,13 @@ export function paddleReach(gateCount: number, config: PhysicsConfig, width = 1)
   return paddleHalfWidth(gateCount, config, width) + config.ballRadius / config.paddleRadius;
 }
 
-/** How far the paddle center can move from the gate center, either way.  A wider paddle has less room. */
+/**
+ * How far the paddle center can move from the gate center, either way: to
+ * the gate's end, then paddleOverhang of its half-width past it.  A wider
+ * paddle has less room.
+ */
 export function paddleTravel(gateCount: number, config: PhysicsConfig, width = 1): number {
-  return gateHalfWidth(gateCount, config) - paddleHalfWidth(gateCount, config, width);
+  return gateHalfWidth(gateCount, config) - paddleHalfWidth(gateCount, config, width) * (1 - config.paddleOverhang);
 }
 
 /** The width multiplier for a gate's paddle right now: wider during a wide paddle. */
@@ -305,8 +315,9 @@ export function ballSpeed(ball: Ball): number {
 // Step ---------------------------------------------------------------------------
 
 /**
- * Moves a paddle for `dt` seconds and keeps it inside its gate.  Shared by
- * step() and by clients predicting their own paddle between snapshots.
+ * Moves a paddle for `dt` seconds and keeps it within its travel
+ * (paddleTravel).  Shared by step() and by clients predicting their own
+ * paddle between snapshots.
  */
 export function movePaddle(paddle: number, gate: number, gateCount: number, dir: Dir, dt: number, config: PhysicsConfig, width = 1): number {
   const center = gateCenter(gate, gateCount);
@@ -380,7 +391,11 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
       events.push({ type: 'pickup', kind: pickup.kind, gate: active ? owner : -1, ball: index });
       if (active && kind === 'wide') gates = gates.map((g, i) => (i === owner ? { ...g, wideTicks: Math.round(config.wideDuration * TICK_RATE) } : g));
       if (active && kind === 'shield') gates = gates.map((g, i) => (i === owner ? { ...g, shieldTicks: Math.round(config.shieldDuration * TICK_RATE) } : g));
-      if (active && kind === 'multiball') split.push(...splitBall(moved.ball, Math.min(2, room)));
+      if (active && kind === 'multiball') {
+        let more: BallState[];
+        [more, seed] = splitBall(moved.ball, Math.min(2, room), seed);
+        split.push(...more);
+      }
     }
     if (collected.length > 0) pickups = pickups.filter((p) => !collected.includes(p));
 
@@ -481,13 +496,20 @@ function pickupSpot(seed: number): [number, number, number] {
   return [r * Math.cos(angle), r * Math.sin(angle), s2];
 }
 
-/** `count` more balls from `ball`, heading MULTIBALL_SPREAD either side of it. */
-function splitBall(ball: BallState, count: number): BallState[] {
-  return [MULTIBALL_SPREAD, -MULTIBALL_SPREAD].slice(0, Math.max(0, count)).map((turn) => {
-    const cos = Math.cos(turn);
-    const sin = Math.sin(turn);
-    return { ...ball, vx: ball.vx * cos - ball.vy * sin, vy: ball.vx * sin + ball.vy * cos };
-  });
+/**
+ * `count` more balls where `ball` is, at its speed, each heading a random
+ * way whatever its heading.  @returns [balls, next seed]
+ */
+function splitBall(ball: BallState, count: number, seed: number): [BallState[], number] {
+  const speed = ballSpeed(ball);
+  const balls: BallState[] = [];
+  for (let i = 0; i < count; i++) {
+    let r: number;
+    [r, seed] = nextRandom(seed);
+    const angle = r * 2 * Math.PI;
+    balls.push({ ...ball, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed });
+  }
+  return [balls, seed];
 }
 
 /** Whether the path (a polyline) comes within `radius` of the point. */
