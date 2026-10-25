@@ -106,7 +106,7 @@ export class RoomSession {
     options: SessionOptions = {},
   ) {
     this.isHost = room.hostId === player.id;
-    this.settings = { goalLimit: room.goalLimit, matchSeconds: room.matchSeconds, powerUps: room.powerUps };
+    this.settings = { goalLimit: room.goalLimit, matchSeconds: room.matchSeconds, powerUps: room.powerUps, multiballOnly: room.multiballOnly };
     this.client = options.client ?? supabase;
     this.graceMs = options.graceMs ?? ROOM_GRACE_MS;
 
@@ -321,7 +321,10 @@ export class RoomSession {
       if (event.playerId === this.player.id) this.loseSeat();
       return;
     }
-    if (event.type === 'settings') this.settings = { goalLimit: event.goalLimit, matchSeconds: event.matchSeconds, powerUps: event.powerUps };
+    if (event.type === 'settings') {
+      const { goalLimit, matchSeconds, powerUps, multiballOnly } = event;
+      this.settings = { goalLimit, matchSeconds, powerUps, multiballOnly };
+    }
     if (event.type === 'start') this.phase = 'playing';
     if (event.type === 'end') this.phase = 'finished';
     this.listener.event?.(event);

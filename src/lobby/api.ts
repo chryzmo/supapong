@@ -1,10 +1,10 @@
 import { supabase } from '../supabase';
-import { DEFAULT_GOAL_LIMIT, type LobbyRoom, type SeatedRoom } from '../types';
+import { DEFAULT_GOAL_LIMIT, gameTypeFlags, type GameType, type LobbyRoom, type SeatedRoom } from '../types';
 
 export async function fetchLobbyRooms(): Promise<LobbyRoom[]> {
   const { data, error } = await supabase
     .from('lobby_rooms')
-    .select('id, name, host_id, host_name, player_count, max_players, goal_limit, power_ups, match_seconds')
+    .select('id, name, host_id, host_name, player_count, max_players, goal_limit, power_ups, match_seconds, multiball_only')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data.map((r) => ({
@@ -17,16 +17,19 @@ export async function fetchLobbyRooms(): Promise<LobbyRoom[]> {
     goalLimit: r.goal_limit,
     matchSeconds: r.match_seconds,
     powerUps: r.power_ups,
+    multiballOnly: r.multiball_only,
   }));
 }
 
 /** Creates a room and seats the caller as host, in one transaction (see create_room). */
-export async function createRoom(name: string, maxPlayers: number, goalLimit = DEFAULT_GOAL_LIMIT, powerUps = true): Promise<string> {
+export async function createRoom(name: string, maxPlayers: number, goalLimit = DEFAULT_GOAL_LIMIT, gameType: GameType = 'power-ups'): Promise<string> {
+  const { powerUps, multiballOnly } = gameTypeFlags(gameType);
   const { data, error } = await supabase.rpc('create_room', {
     p_name: name,
     p_max_players: maxPlayers,
     p_goal_limit: goalLimit,
     p_power_ups: powerUps,
+    p_multiball_only: multiballOnly,
   });
   if (error) throw error;
   return data;
@@ -55,7 +58,7 @@ export async function leaveRoom(room: SeatedRoom, userId: string): Promise<void>
 export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null> {
   const { data, error } = await supabase
     .from('room_players')
-    .select('seat, rooms!inner(id, name, host_id, max_players, goal_limit, match_seconds, power_ups, status)')
+    .select('seat, rooms!inner(id, name, host_id, max_players, goal_limit, match_seconds, power_ups, multiball_only, status)')
     .eq('player_id', userId)
     .eq('rooms.status', 'waiting')
     .order('joined_at', { ascending: false })
@@ -71,6 +74,7 @@ export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null
     goalLimit: data.rooms.goal_limit,
     matchSeconds: data.rooms.match_seconds,
     powerUps: data.rooms.power_ups,
+    multiballOnly: data.rooms.multiball_only,
     seat: data.seat,
   };
 }
@@ -78,7 +82,7 @@ export async function fetchSeatedRoom(userId: string): Promise<SeatedRoom | null
 export async function fetchRoom(roomId: string, seat: number): Promise<SeatedRoom> {
   const { data, error } = await supabase
     .from('rooms')
-    .select('id, name, host_id, max_players, goal_limit, match_seconds, power_ups')
+    .select('id, name, host_id, max_players, goal_limit, match_seconds, power_ups, multiball_only')
     .eq('id', roomId)
     .single();
   if (error) throw error;
@@ -90,6 +94,7 @@ export async function fetchRoom(roomId: string, seat: number): Promise<SeatedRoo
     goalLimit: data.goal_limit,
     matchSeconds: data.match_seconds,
     powerUps: data.power_ups,
+    multiballOnly: data.multiball_only,
     seat,
   };
 }

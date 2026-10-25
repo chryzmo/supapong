@@ -50,12 +50,40 @@ export const DEFAULT_MATCH_SECONDS = 120;
 /**
  * The host's choices for a match.  What ends it: a total number of goals, a
  * length in seconds, or both, whichever comes first (null is "no limit", and
- * at most one can be).  And whether it has power-ups.
+ * at most one can be).  And which power-ups it has (see GameType).
  */
 export interface MatchSettings {
   goalLimit: number | null;
   matchSeconds: number | null;
   powerUps: boolean;
+  /** With powerUps: every token is a multiball.  False from a host on older code, which doesn't send it. */
+  multiballOnly: boolean;
+}
+
+/**
+ * The game types players choose from: the two power-up flags, as one
+ * choice.  The flags are what's stored and sent, so code that only knows
+ * powerUps still reads a multiball game as one with power-ups.
+ */
+export const GAME_TYPES = [
+  { value: 'power-ups', label: 'Power-ups', title: 'Tokens on the board: wide paddle, shield, multiball' },
+  { value: 'multiball', label: 'Only multiball', title: 'Every token on the board is a multiball' },
+  { value: 'classic', label: 'No power-ups', title: 'Just the ball and the paddles' },
+] as const;
+export type GameType = (typeof GAME_TYPES)[number]['value'];
+
+export function gameTypeOf({ powerUps, multiballOnly }: Pick<MatchSettings, 'powerUps' | 'multiballOnly'>): GameType {
+  if (!powerUps) return 'classic';
+  return multiballOnly ? 'multiball' : 'power-ups';
+}
+
+export function gameTypeFlags(type: GameType): Pick<MatchSettings, 'powerUps' | 'multiballOnly'> {
+  return { powerUps: type !== 'classic', multiballOnly: type === 'multiball' };
+}
+
+/** "⚡ power-ups", "multiball only", "classic": for the lobby list. */
+export function describeGameType(settings: Pick<MatchSettings, 'powerUps' | 'multiballOnly'>): string {
+  return { 'power-ups': '⚡ power-ups', multiball: '⚡ multiball only', classic: 'classic' }[gameTypeOf(settings)];
 }
 
 /** "10 goals or 2 minutes", "10 goals", "5 minutes". */
@@ -275,13 +303,17 @@ export function parseRosterEntry(value: unknown): RosterEntry | null {
   return { playerId, displayName, seat };
 }
 
-/** A goal limit (1 to 50) and length in seconds (up to an hour), either of them null but not both, and the power-ups flag. */
-function parseSettings(goalLimit: unknown, matchSeconds: unknown, powerUps: unknown): MatchSettings | null {
+/**
+ * A goal limit (1 to 50) and length in seconds (up to an hour), either of
+ * them null but not both, and the power-up flags.  A host on older code
+ * sends no multiballOnly: off.
+ */
+function parseSettings(goalLimit: unknown, matchSeconds: unknown, powerUps: unknown, multiballOnly: unknown = false): MatchSettings | null {
   if (goalLimit !== null && !(isCount(goalLimit) && goalLimit >= 1 && goalLimit <= GOAL_LIMIT_MAX)) return null;
   if (matchSeconds !== null && !(isCount(matchSeconds) && matchSeconds >= 1 && matchSeconds <= 3600)) return null;
   if (goalLimit === null && matchSeconds === null) return null;
-  if (typeof powerUps !== 'boolean') return null;
-  return { goalLimit, matchSeconds, powerUps };
+  if (typeof powerUps !== 'boolean' || typeof multiballOnly !== 'boolean') return null;
+  return { goalLimit, matchSeconds, powerUps, multiballOnly };
 }
 
 export function parseRoomEvent(value: unknown): RoomEvent | null {
@@ -306,6 +338,7 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
         value.goalLimit === undefined ? DEFAULT_GOAL_LIMIT : value.goalLimit,
         value.matchSeconds === undefined ? DEFAULT_MATCH_SECONDS : value.matchSeconds,
         value.powerUps ?? false,
+        value.multiballOnly,
       );
       if (!settings) return null;
       const protocol = value.protocol ?? 1;
@@ -313,7 +346,7 @@ export function parseRoomEvent(value: unknown): RoomEvent | null {
       return { type: 'start', gates, ...settings, protocol };
     }
     case 'settings': {
-      const settings = parseSettings(value.goalLimit, value.matchSeconds, value.powerUps);
+      const settings = parseSettings(value.goalLimit, value.matchSeconds, value.powerUps, value.multiballOnly);
       return settings && { type: 'settings', ...settings };
     }
     case 'closed':

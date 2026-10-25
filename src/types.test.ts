@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   DISPLAY_NAME_MAX,
+  GAME_TYPES,
   MAX_BALLS,
   ROOM_NAME_MAX,
+  describeGameType,
   describeMatchEnd,
+  gameTypeFlags,
+  gameTypeOf,
   matchProtocol,
   olderHostRules,
   parseInputMessage,
@@ -82,7 +86,7 @@ describe('parseRoomEvent', () => {
   });
 
   it('accepts start, closed and removed', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 2, powerUps: false, multiballOnly: false });
   });
 
   it('keeps the power-ups flag', () => {
@@ -93,16 +97,17 @@ describe('parseRoomEvent', () => {
       matchSeconds: 120,
       protocol: 3,
       powerUps: true,
+      multiballOnly: false,
     });
   });
 
   it('treats a start without a protocol (a host on older code) as protocol 1', () => {
-    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 1, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 15 })).toEqual({ type: 'start', gates, goalLimit: 15, matchSeconds: 120, protocol: 1, powerUps: false, multiballOnly: false });
   });
 
   it('keeps the bot flag on bot gates', () => {
     const withBot = [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1', bot: true }];
-    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2 })).toEqual({ type: 'start', gates: withBot, goalLimit: 10, matchSeconds: 120, protocol: 2, powerUps: false, multiballOnly: false });
     expect(parseRoomEvent({ type: 'start', gates: [gates[0], { ...withBot[1], bot: 'yes' }], goalLimit: 10, matchSeconds: 120, protocol: 2 })).toEqual({
       type: 'start',
       gates: [gates[0], { seat: 1, playerId: 'bot-1', displayName: 'Bot 1' }],
@@ -110,6 +115,7 @@ describe('parseRoomEvent', () => {
       matchSeconds: 120,
       protocol: 2,
       powerUps: false,
+      multiballOnly: false,
     });
   });
 
@@ -120,14 +126,19 @@ describe('parseRoomEvent', () => {
 
   it('accepts settings changes from the waiting room', () => {
     const settings = [
-      { type: 'settings', goalLimit: null, matchSeconds: 300, powerUps: true },
-      { type: 'settings', goalLimit: 25, matchSeconds: 120, powerUps: false },
+      { type: 'settings', goalLimit: null, matchSeconds: 300, powerUps: true, multiballOnly: true },
+      { type: 'settings', goalLimit: 25, matchSeconds: 120, powerUps: false, multiballOnly: false },
     ];
     for (const event of settings) expect(parseRoomEvent(event)).toEqual(event);
   });
 
+  it('keeps the multiball-only flag, off when a host on older code leaves it out', () => {
+    expect(parseRoomEvent({ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true, multiballOnly: true })).toMatchObject({ multiballOnly: true });
+    expect(parseRoomEvent({ type: 'settings', goalLimit: 10, matchSeconds: 120, powerUps: true })).toMatchObject({ multiballOnly: false });
+  });
+
   it('plays to 10 when a start has no goal limit (a host on the previous version)', () => {
-    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 1, powerUps: false });
+    expect(parseRoomEvent({ type: 'start', gates })).toEqual({ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 1, powerUps: false, multiballOnly: false });
     expect(parseRoomEvent({ type: 'closed' })).toEqual({ type: 'closed' });
     expect(parseRoomEvent({ type: 'removed', playerId: 'a' })).toEqual({ type: 'removed', playerId: 'a' });
   });
@@ -143,6 +154,7 @@ describe('parseRoomEvent', () => {
     ['settings without a length', { type: 'settings', goalLimit: 10, powerUps: true }],
     ['settings with too many goals', { type: 'settings', goalLimit: 51, matchSeconds: 120, powerUps: true }],
     ['settings without the power-ups flag', { type: 'settings', goalLimit: 10, matchSeconds: 120 }],
+    ['settings with a multiball-only flag that isn\'t a boolean', { type: 'settings', goalLimit: 10, matchSeconds: 120, powerUps: true, multiballOnly: 1 }],
     ['a start with protocol 0', { type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 0 }],
     ['a start with a power-ups flag that isn\'t a boolean', { type: 'start', gates, goalLimit: 10, powerUps: 'yes' }],
     ['a start with a fractional protocol', { type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 1.5 }],
@@ -282,10 +294,28 @@ describe('describeMatchEnd', () => {
   });
 });
 
+describe('game types', () => {
+  it('round-trip through the two flags', () => {
+    for (const { value } of GAME_TYPES) expect(gameTypeOf(gameTypeFlags(value))).toBe(value);
+    expect(gameTypeFlags('multiball')).toEqual({ powerUps: true, multiballOnly: true });
+    expect(gameTypeFlags('classic')).toEqual({ powerUps: false, multiballOnly: false });
+  });
+
+  it('read power-ups off as classic, whatever the multiball flag says', () => {
+    expect(gameTypeOf({ powerUps: false, multiballOnly: true })).toBe('classic');
+  });
+
+  it('describe each for the lobby', () => {
+    expect(describeGameType({ powerUps: true, multiballOnly: false })).toBe('⚡ power-ups');
+    expect(describeGameType({ powerUps: true, multiballOnly: true })).toBe('⚡ multiball only');
+    expect(describeGameType({ powerUps: false, multiballOnly: false })).toBe('classic');
+  });
+});
+
 describe('matchProtocol', () => {
   it('asks for protocol 6 for every match, since the board changed', () => {
-    expect(matchProtocol({ powerUps: false, goalLimit: 10, matchSeconds: 120 })).toBe(6);
-    expect(matchProtocol({ powerUps: true, goalLimit: null, matchSeconds: 600 })).toBe(6);
+    expect(matchProtocol({ powerUps: false, multiballOnly: false, goalLimit: 10, matchSeconds: 120 })).toBe(6);
+    expect(matchProtocol({ powerUps: true, multiballOnly: false, goalLimit: null, matchSeconds: 600 })).toBe(6);
   });
 });
 

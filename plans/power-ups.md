@@ -131,6 +131,7 @@ About a day.
 
 - **More tokens:** up to 6 on the board at once (`pickupMax`; 3 at first), each lasting 20 s instead of 10.  The timer runs while there's room on the board, a volley spawns unless it's full, and a new token tries a few seeded spots to land clear of the others.  Snapshots carry `pickups` as a list, so power-up matches need protocol 5.  A guest still parses an old host's single `pickup`, and plays an old host's match (its `start` says 3 or 4) by the one-token rules.
 - **Multiball directions:** the two new balls head in random directions (seeded) instead of ±20° off the old ball's heading.
+- **Game types:** the Power-ups checkbox became a Game type dropdown: Power-ups, Only multiball, No power-ups.  Only multiball is `rooms.multiball_only` (migration `20261025050000_multiball_only.sql`) beside `power_ups`, and `multiballOnly` in the settings, `start` and the physics config.
 
 ### Later
 

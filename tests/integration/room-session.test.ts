@@ -48,7 +48,7 @@ async function openSeat(player: TestPlayer, room: SeatedRoom): Promise<Seat> {
 async function createRoom(host: TestPlayer, maxPlayers = 4, powerUps = true): Promise<SeatedRoom> {
   const { data, error } = await host.client.rpc('create_room', { p_name: 'Session test', p_max_players: maxPlayers, p_power_ups: powerUps });
   if (error) throw error;
-  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, goalLimit: 10, matchSeconds: 120, powerUps, seat: 0 };
+  return { id: data, name: 'Session test', hostId: host.id, maxPlayers, goalLimit: 10, matchSeconds: 120, powerUps, multiballOnly: false, seat: 0 };
 }
 
 async function join(player: TestPlayer, room: SeatedRoom): Promise<SeatedRoom> {
@@ -189,7 +189,7 @@ describe('startMatch', () => {
     expect(await seatIds(room.id)).toEqual(expected.map((g) => g.playerId));
     for (const guest of guests) {
       await waitFor(() => guest.events.length > 0, 'the start event');
-      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true }]);
+      expect(guest.events).toEqual([{ type: 'start', gates: expected, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true, multiballOnly: false }]);
     }
   });
 
@@ -202,15 +202,15 @@ describe('startMatch', () => {
   });
 
   it('starts with the settings the host chose in the waiting room, and tells guests as they change', async () => {
-    // A classic room, which the host switches to power-ups.
+    // A classic room, which the host switches to only multiball.
     const { room, host, guests } = await setup(1, false);
-    const settings = { goalLimit: null, matchSeconds: 300, powerUps: true };
+    const settings = { goalLimit: null, matchSeconds: 300, powerUps: true, multiballOnly: true };
     await host.session.changeSettings(settings);
     await waitFor(() => guests[0]!.events.some((e) => e.type === 'settings'), 'the settings event');
     expect(guests[0]!.events).toEqual([{ type: 'settings', ...settings }]);
     expect(guests[0]!.session.getSettings()).toEqual(settings);
-    const { data } = await admin.from('rooms').select('goal_limit, match_seconds, power_ups').eq('id', room.id).single();
-    expect(data).toEqual({ goal_limit: null, match_seconds: 300, power_ups: true });
+    const { data } = await admin.from('rooms').select('goal_limit, match_seconds, power_ups, multiball_only').eq('id', room.id).single();
+    expect(data).toEqual({ goal_limit: null, match_seconds: 300, power_ups: true, multiball_only: true });
 
     const start = await host.session.startMatch();
     expect(start).toMatchObject({ ...settings, protocol: 6 });
@@ -220,7 +220,7 @@ describe('startMatch', () => {
 
   it("won't let a guest change the settings", async () => {
     const { guests } = await setup(1);
-    await expect(guests[0]!.session.changeSettings({ goalLimit: 5, matchSeconds: 120, powerUps: false })).rejects.toThrow('Only the host can change the match settings.');
+    await expect(guests[0]!.session.changeSettings({ goalLimit: 5, matchSeconds: 120, powerUps: false, multiballOnly: false })).rejects.toThrow('Only the host can change the match settings.');
   });
 
   it('adds bots in the free seats, without giving them seats in the database', async () => {
@@ -234,7 +234,7 @@ describe('startMatch', () => {
     ]);
     expect(await seatIds(room.id)).toEqual([host.player.id, guests[0]!.player.id]);
     await waitFor(() => guests[0]!.events.length > 0, 'the start event');
-    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true }]);
+    expect(guests[0]!.events).toEqual([{ type: 'start', gates, goalLimit: 10, matchSeconds: 120, protocol: 6, powerUps: true, multiballOnly: false }]);
   });
 
   it('adds bots past the room size, up to 8 gates', async () => {

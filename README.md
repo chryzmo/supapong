@@ -21,7 +21,7 @@ make dev                   # http://127.0.0.1:5173
 
 `make` on its own lists every target: local stack, builds, tests and deploys.  Each one wraps an `npm` or `npx supabase` command, so those work directly too.  The Makefile sets `DOCKER_HOST` for Podman automatically when Docker isn't installed.
 
-- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Power-ups are on by default; untick them in Create room for a classic match.  In the waiting room the host picks what ends the match (5 to 25 goals, 2, 5 or 10 minutes, or no limit on one of them; 10 goals or 2 minutes to start with) and can switch power-ups on or off.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
+- **Play multiplayer:** open two or more tabs.  Each tab is its own player (sessions live in `sessionStorage`).  Pick a name, create a room in one tab, join from the others, and the host presses Start.  The host can fill empty seats with bots first.  Pick the game type in Create room: Power-ups (the default), Only multiball, or No power-ups for a classic match.  In the waiting room the host picks what ends the match (5 to 25 goals, 2, 5 or 10 minutes, or no limit on one of them; 10 goals or 2 minutes to start with) and can change the game type.  Move with ← → or A D.  On a phone or tablet, hold the ◀ ▶ buttons under the board instead (add `?touch=1` to the URL to try them on a desktop).
 - **Send feedback:** the lobby's Feedback button, or Send feedback after a match.  On the hosted site it becomes a GitHub issue; locally it's only saved, in the `feedback` table.
 - **Practice alone:** open [`/#sandbox`](http://127.0.0.1:5173/#sandbox), or use Practice in the lobby.  It plays you against bots and has sliders for every physics setting.
 
@@ -126,7 +126,7 @@ The design is host-authoritative.  Guests replay the host's physics between snap
 |---|---|---|---|
 | `input` | guest → host, on `room:{id}:input:{player_id}` | on change, and 5 Hz while moving | `{ seat, dir, paddle }`, where `dir` is -1, 0 or 1 and `paddle` is the guest's paddle angle |
 | `state` | host → guests | 20 Hz | `{ tick, balls: [x, y, vx, vy, touch, rally][], paddles[], active[], scores[], goals, seed, respawn }`, numbers rounded to 4 decimals; under 300 bytes of JSON with 8 players |
-| `event` | host → all | rare | `start` (gate order, bots marked, goal limit and length, power-ups on or off, the oldest protocol version that can play it), `settings` (the host changed the goal limit, length or power-ups), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
+| `event` | host → all | rare | `start` (gate order, bots marked, goal limit and length, the game type, the oldest protocol version that can play it), `settings` (the host changed the goal limit, length or game type), `goal` (gate and scorer), `end` (scores), `closed`, `removed` |
 
 Every incoming message is checked by a parser in [`src/types.ts`](src/types.ts) before app code sees it.  Malformed messages are dropped.
 

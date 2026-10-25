@@ -1,6 +1,7 @@
 // Single-player sandbox: you at gate 0, bots (or walls) everywhere else, and
 // sliders for tuning the physics live.  No network.
-import { MAX_PLAYERS, MIN_PLAYERS } from '../types';
+import { chosenGameType, chosenLimit, gameTypeSelect, showLimits } from '../choices';
+import { DEFAULT_GOAL_LIMIT, DEFAULT_MATCH_SECONDS, MAX_PLAYERS, MIN_PLAYERS, gameTypeFlags, type MatchSettings } from '../types';
 import { h, type View } from '../ui';
 import { Announcer } from './announce';
 import { botInput } from './bot';
@@ -66,8 +67,10 @@ export interface SandboxActions {
 }
 
 export function sandboxScreen(actions: SandboxActions): View {
-  // Power-ups are off for online matches (DEFAULT_CONFIG) for now, but on here.
+  // DEFAULT_CONFIG has power-ups off (a room turns them on); here they start on.
   const config: PhysicsConfig = { ...DEFAULT_CONFIG, powerUps: true };
+  /** What ends the game, as a room has it: null is "no limit". */
+  let limits: Pick<MatchSettings, 'goalLimit' | 'matchSeconds'> = { goalLimit: DEFAULT_GOAL_LIMIT, matchSeconds: DEFAULT_MATCH_SECONDS };
   let players = 4;
   let bots = true;
   let botSkill = 0.7;
@@ -126,11 +129,28 @@ export function sandboxScreen(actions: SandboxActions): View {
     skillValue.textContent = botSkill.toFixed(2);
   });
 
-  const powerUpsToggle = h('input', { type: 'checkbox', checked: config.powerUps });
-  powerUpsToggle.addEventListener('change', () => {
-    config.powerUps = powerUpsToggle.checked;
+  const typeSelect = gameTypeSelect();
+  typeSelect.addEventListener('change', () => {
+    Object.assign(config, gameTypeFlags(chosenGameType(typeSelect)));
     restart();
   });
+
+  // What ends the game, as in the waiting room.  "No limit" is an infinite one.
+  const goalsSelect = h('select', {});
+  const lengthSelect = h('select', {});
+  const setLimits = (): void => {
+    limits = { goalLimit: chosenLimit(goalsSelect), matchSeconds: chosenLimit(lengthSelect) };
+    config.goalLimit = limits.goalLimit ?? Infinity;
+    config.matchDuration = limits.matchSeconds ?? Infinity;
+    showLimits(goalsSelect, lengthSelect, limits);
+  };
+  showLimits(goalsSelect, lengthSelect, limits);
+  for (const select of [goalsSelect, lengthSelect]) {
+    select.addEventListener('change', () => {
+      setLimits();
+      restart();
+    });
+  }
 
   const slider = (spec: Slider): HTMLElement => {
     const value = h('span', { className: 'muted' }, String(config[spec.key]));
@@ -164,8 +184,8 @@ export function sandboxScreen(actions: SandboxActions): View {
 
   const copyButton = h('button', { type: 'button', className: 'secondary' }, 'Copy config');
   copyButton.addEventListener('click', () => {
-    // Without powerUps: DEFAULT_CONFIG keeps them off until online matches carry them.
-    const { powerUps: _, ...tuned } = config;
+    // Without the game type and what ends the game: rooms choose those.
+    const { powerUps: _p, multiballOnly: _m, goalLimit: _g, matchDuration: _d, ...tuned } = config;
     void navigator.clipboard.writeText(JSON.stringify(tuned, null, 2)).then(() => {
       copyButton.textContent = 'Copied';
       setTimeout(() => (copyButton.textContent = 'Copy config'), 1200);
@@ -236,14 +256,15 @@ export function sandboxScreen(actions: SandboxActions): View {
       'aside',
       { className: 'panel tuning' },
       h('div', { className: 'header' }, h('h1', {}, 'Practice'), backButton),
+      h('div', { className: 'row' }, restartButton, pauseButton, copyButton),
       h('div', { className: 'row' }, h('label', {}, 'Gates', playersSelect), h('label', { className: 'check' }, botsToggle, 'Bots')),
       h('label', {}, h('span', { className: 'slider-label' }, 'Bot skill', skillValue), skillSlider),
+      h('div', { className: 'row' }, h('label', {}, 'Goals', goalsSelect), h('label', {}, 'Length', lengthSelect)),
+      h('label', {}, 'Game type', typeSelect),
       h('h2', {}, 'Physics'),
       ...sliders,
       h('h2', {}, 'Power-ups'),
-      h('label', { className: 'check' }, powerUpsToggle, 'Power-ups'),
       ...powerUpSliders,
-      h('div', { className: 'row' }, restartButton, pauseButton, copyButton),
     ),
   );
 

@@ -29,7 +29,7 @@ describe('createRoom', () => {
     actAs(host);
     const roomId = await createRoom('Arena', 4);
 
-    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 0 });
+    expect(await fetchSeatedRoom(host.id)).toEqual({ id: roomId, name: 'Arena', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, multiballOnly: false, seat: 0 });
 
     actAs(other);
     expect(await lobbyEntry(roomId)).toEqual({
@@ -42,6 +42,7 @@ describe('createRoom', () => {
       goalLimit: 10,
       matchSeconds: 120,
       powerUps: true,
+      multiballOnly: false,
     });
   });
 
@@ -53,12 +54,16 @@ describe('createRoom', () => {
     expect((await lobbyEntry(roomId))?.goalLimit).toBe(25);
   });
 
-  it('makes a classic room, without power-ups, when asked', async () => {
+  it.each([
+    ['classic', { powerUps: false, multiballOnly: false }],
+    ['multiball', { powerUps: true, multiballOnly: true }],
+    ['power-ups', { powerUps: true, multiballOnly: false }],
+  ] as const)('makes a %s room when asked', async (gameType, flags) => {
     actAs(host);
-    const roomId = await createRoom('Classic', 2, 10, false);
-    expect((await fetchRoom(roomId, 0)).powerUps).toBe(false);
+    const roomId = await createRoom('Typed', 2, 10, gameType);
+    expect(await fetchRoom(roomId, 0)).toMatchObject(flags);
     actAs(other);
-    expect((await lobbyEntry(roomId))?.powerUps).toBe(false);
+    expect(await lobbyEntry(roomId)).toMatchObject(flags);
   });
 
   it('rejects sizes outside 2-8 and empty names', async () => {
@@ -86,7 +91,7 @@ describe('joinRoom', () => {
     expect(await joinRoom(roomId)).toBe(1);
     expect(await joinRoom(roomId)).toBe(1);
     expect((await lobbyEntry(roomId))?.playerCount).toBe(2);
-    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 1 });
+    expect(await fetchRoom(roomId, 1)).toEqual({ id: roomId, name: 'Join me', hostId: host.id, maxPlayers: 3, goalLimit: 10, matchSeconds: 120, powerUps: true, multiballOnly: false, seat: 1 });
   });
 
   it('surfaces the RPC error messages', async () => {

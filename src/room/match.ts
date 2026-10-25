@@ -26,6 +26,7 @@ export function matchScreen(session: RoomSession, start: MatchStart, actions: Ro
     goalLimit: start.goalLimit ?? Infinity,
     matchDuration: start.matchSeconds ?? Infinity,
     powerUps: start.powerUps,
+    multiballOnly: start.multiballOnly,
     ...olderHostRules(start),
   };
   const { room, player, isHost } = session;

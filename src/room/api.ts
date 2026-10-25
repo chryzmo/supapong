@@ -31,7 +31,7 @@ export async function setRoomStatus(client: AppClient, roomId: string, status: '
   if (error) throw error;
 }
 
-/** Host only, before the match (checked in set_match_settings): what ends it (null is "no limit"), and power-ups. */
+/** Host only, before the match (checked in set_match_settings): what ends it (null is "no limit"), and the power-up flags. */
 export async function setMatchSettings(client: AppClient, roomId: string, settings: MatchSettings): Promise<void> {
   const { error } = await client.rpc('set_match_settings', {
     p_room_id: roomId,
@@ -39,6 +39,7 @@ export async function setMatchSettings(client: AppClient, roomId: string, settin
     p_goal_limit: settings.goalLimit as number,
     p_match_seconds: settings.matchSeconds as number,
     p_power_ups: settings.powerUps,
+    p_multiball_only: settings.multiballOnly,
   });
   if (error) throw error;
 }

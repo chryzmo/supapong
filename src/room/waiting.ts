@@ -1,10 +1,11 @@
 import { BOT_LEVELS } from '../game/bot';
+import { chosenGameType, chosenLimit, gameTypeSelect, showLimits } from '../choices';
 import {
-  GOAL_LIMIT_CHOICES,
-  MATCH_LENGTH_CHOICES,
   MIN_PLAYERS,
   PROTOCOL_VERSION,
   describeMatchEnd,
+  gameTypeFlags,
+  gameTypeOf,
   type Gate,
   type MatchSettings,
   type MatchStart,
@@ -63,56 +64,47 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
     h('label', {}, 'Bot skill', skillSelect),
   );
 
-  // The match settings: what ends it, and power-ups.  The host picks;
+  // The match settings: what ends it, and the game type.  The host picks;
   // everyone sees them.  "No limit" is the empty value, and only one of the
   // two limits can have it.
   const settingsLine = h('p', { className: 'muted' });
   const goalsSelect = h('select', { name: 'goal_limit' });
   const lengthSelect = h('select', { name: 'match_length' });
-  const powerUpsToggle = h('input', { type: 'checkbox', name: 'power_ups' });
+  const typeSelect = gameTypeSelect();
   const settingsControls = h(
     'div',
     { className: 'row settings' },
     h('label', {}, 'Goals', goalsSelect),
     h('label', {}, 'Length', lengthSelect),
-    h('label', { className: 'check', title: 'Tokens on the board: wide paddle, shield, multiball' }, powerUpsToggle, 'Power-ups'),
+    h('label', {}, 'Game type', typeSelect),
   );
-  const chosen = (select: HTMLSelectElement): number | null => (select.value === '' ? null : Number(select.value));
 
   function renderSettings(): void {
     const settings = session.getSettings();
     const both = settings.goalLimit !== null && settings.matchSeconds !== null;
-    const mode = settings.powerUps ? 'With power-ups.' : 'Classic, no power-ups.';
+    const mode = { 'power-ups': 'With power-ups.', multiball: 'Only multiball tokens.', classic: 'Classic, no power-ups.' }[gameTypeOf(settings)];
     settingsLine.textContent = `The match ends after ${describeMatchEnd(settings)}${both ? ', whichever comes first' : ''}.  ${mode}`;
     if (!isHost) return;
-    powerUpsToggle.checked = settings.powerUps;
-    const goals = [...new Set([...GOAL_LIMIT_CHOICES, ...(settings.goalLimit !== null ? [settings.goalLimit] : [])])].sort((a, b) => a - b);
-    goalsSelect.replaceChildren(
-      ...goals.map((n) => h('option', { value: String(n), selected: n === settings.goalLimit }, `${n} goals`)),
-      h('option', { value: '', selected: settings.goalLimit === null, disabled: settings.matchSeconds === null }, 'No limit'),
-    );
-    lengthSelect.replaceChildren(
-      ...MATCH_LENGTH_CHOICES.map((n) => h('option', { value: String(n), selected: n === settings.matchSeconds }, `${n / 60} minutes`)),
-      h('option', { value: '', selected: settings.matchSeconds === null, disabled: settings.goalLimit === null }, 'No limit'),
-    );
+    typeSelect.value = gameTypeOf(settings);
+    showLimits(goalsSelect, lengthSelect, settings);
   }
 
   async function saveSettings(): Promise<void> {
-    const next: MatchSettings = { goalLimit: chosen(goalsSelect), matchSeconds: chosen(lengthSelect), powerUps: powerUpsToggle.checked };
-    goalsSelect.disabled = lengthSelect.disabled = powerUpsToggle.disabled = true;
+    const next: MatchSettings = { goalLimit: chosenLimit(goalsSelect), matchSeconds: chosenLimit(lengthSelect), ...gameTypeFlags(chosenGameType(typeSelect)) };
+    goalsSelect.disabled = lengthSelect.disabled = typeSelect.disabled = true;
     status.textContent = '';
     try {
       await session.changeSettings(next);
     } catch (err) {
       status.textContent = errorMessage(err);
     } finally {
-      goalsSelect.disabled = lengthSelect.disabled = powerUpsToggle.disabled = false;
+      goalsSelect.disabled = lengthSelect.disabled = typeSelect.disabled = false;
       renderSettings();
     }
   }
   goalsSelect.addEventListener('change', () => void saveSettings());
   lengthSelect.addEventListener('change', () => void saveSettings());
-  powerUpsToggle.addEventListener('change', () => void saveSettings());
+  typeSelect.addEventListener('change', () => void saveSettings());
 
   const start = h('button', { type: 'button', disabled: true }, 'Start match');
   start.addEventListener('click', async () => {
@@ -186,8 +178,8 @@ export function waitingScreen(session: RoomSession, actions: RoomActions): View 
       if (event.type === 'start' && event.protocol > PROTOCOL_VERSION) {
         void exitRoom(session, actions, 'This match needs a newer version of the game.  Reload the page to join.');
       } else if (event.type === 'start') {
-        const { gates, goalLimit, matchSeconds, protocol, powerUps } = event;
-        actions.started({ gates, goalLimit, matchSeconds, protocol, powerUps });
+        const { gates, goalLimit, matchSeconds, protocol, powerUps, multiballOnly } = event;
+        actions.started({ gates, goalLimit, matchSeconds, protocol, powerUps, multiballOnly });
       }
       if (event.type === 'settings') renderSettings();
       if (event.type === 'closed') actions.left('The host closed the room.');

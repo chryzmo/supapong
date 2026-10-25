@@ -30,11 +30,11 @@ it('calls onChange once when live, then once per lobby change', async () => {
   const seat = await joinRoom(roomId);
   await waitFor(() => calls === 3, 'seat insert');
 
-  await leaveRoom({ id: roomId, name: 'Live', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, seat }, guest.id);
+  await leaveRoom({ id: roomId, name: 'Live', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, multiballOnly: false, seat }, guest.id);
   await waitFor(() => calls === 4, 'seat delete');
 
   actAs(host);
-  await leaveRoom({ id: roomId, name: 'Live', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, seat: 0 }, host.id);
+  await leaveRoom({ id: roomId, name: 'Live', hostId: host.id, maxPlayers: 4, goalLimit: 10, matchSeconds: 120, powerUps: true, multiballOnly: false, seat: 0 }, host.id);
   await waitFor(() => calls === 5, 'room delete');
 });
 

@@ -56,6 +56,12 @@ export interface PhysicsConfig {
    * sandbox turns it on.
    */
   powerUps: boolean;
+  /**
+   * With powerUps: every token is a multiball, and one that can't split
+   * (the most balls are in play) stays on the board instead of turning into
+   * a wide paddle.
+   */
+  multiballOnly: boolean;
   /** A token appears on a ball's every this-many-th consecutive hit. */
   pickupVolley: number;
   /** Otherwise one appears after this many seconds (rolled between the two) with room on the board. */
@@ -92,6 +98,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   matchDuration: 120,
   goalLimit: 10,
   powerUps: false,
+  multiballOnly: false,
   pickupVolley: 6,
   pickupMinSeconds: 8,
   pickupMaxSeconds: 12,
@@ -382,11 +389,15 @@ export function step(state: GameState, inputs: readonly Dir[], config: PhysicsCo
     // Through a token, after someone has touched it: they get it.  A ball
     // collects every token on its path, in board order.
     const owner = moved.ball.lastTouch;
-    const collected = owner >= 0 ? pickups.filter((p) => pathMeets(moved.path, p, config.pickupRadius + config.ballRadius)) : [];
-    for (const pickup of collected) {
+    const met = owner >= 0 ? pickups.filter((p) => pathMeets(moved.path, p, config.pickupRadius + config.ballRadius)) : [];
+    const collected: Pickup[] = [];
+    for (const pickup of met) {
       const active = gates[owner]?.active === true;
-      // Multiball with no room for more balls gives a wide paddle instead.
+      // Multiball with no room for more balls gives a wide paddle instead,
+      // or, with only multiball, waits on the board for room.
       const room = config.maxBalls - balls.length - split.length - (state.balls.length - index - 1);
+      if (config.multiballOnly && room <= 0) continue;
+      collected.push(pickup);
       const kind: PickupKind = pickup.kind === 'multiball' && room <= 0 ? 'wide' : pickup.kind;
       events.push({ type: 'pickup', kind: pickup.kind, gate: active ? owner : -1, ball: index });
       if (active && kind === 'wide') gates = gates.map((g, i) => (i === owner ? { ...g, wideTicks: Math.round(config.wideDuration * TICK_RATE) } : g));
@@ -483,6 +494,8 @@ function spawnPickup(seed: number, others: readonly Pickup[], config: PhysicsCon
       break;
     }
   }
+  // Still rolled, so the seed moves on the same either way.
+  if (config.multiballOnly) kind = 'multiball';
   const pickup = { kind, x, y, ticksLeft: Math.round(config.pickupLifetime * TICK_RATE) };
   return [pickup, timer, s3];
 }

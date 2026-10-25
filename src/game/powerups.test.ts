@@ -274,6 +274,35 @@ describe('multiball', () => {
   });
 });
 
+describe('only multiball', () => {
+  const multi: PhysicsConfig = { ...config, multiballOnly: true };
+
+  it('puts out nothing but multiball tokens', () => {
+    let state = inPlay([ball(0, 0, 0.001, 0)]);
+    const kinds = new Set<string>();
+    for (let seed = 0; seed < 50; seed++) {
+      state = run({ ...state, seed, pickupTimer: 1 }, 1, undefined, multi).state;
+      for (const p of state.pickups ?? []) kinds.add(p.kind);
+      state = { ...state, pickups: [] };
+    }
+    expect([...kinds]).toEqual(['multiball']);
+  });
+
+  it('leaves a token on the board while the most balls are in play, instead of a wide paddle', () => {
+    const full = [radial(0, 2), ball(-0.5, 0, 0, 0.01), ball(0, -0.5, 0.01, 0)];
+    const onTheWay = token('multiball', 0.3, 0);
+    const { state, events } = run(inPlay(full, { pickups: [onTheWay] }), 30, undefined, multi);
+    expect(events.some((e) => e.type === 'pickup')).toBe(false);
+    expect(state.pickups).toMatchObject([{ kind: 'multiball', x: 0.3, y: 0 }]);
+    expect(state.gates[2]!.wideTicks).toBeUndefined();
+  });
+
+  it('splits as usual when there is room', () => {
+    const { state } = run(inPlay([radial(0, 2)], { pickups: [token('multiball', 0.3, 0)] }), 60, (e) => e.type === 'pickup', multi);
+    expect(state.balls).toHaveLength(3);
+  });
+});
+
 describe('bots', () => {
   it('aim their returns through a token at Hard, and not below it', () => {
     // A ball straight at gate 0.  Put a token where the return goes when met
