@@ -89,7 +89,7 @@ export const DEFAULT_CONFIG: Readonly<PhysicsConfig> = {
   ballRadius: 0.022,
   launchSpeed: 0.85,
   speedUpPerHit: 1.08,
-  maxSpeed: 3,
+  maxSpeed: 2.5,
   english: 0.6,
   minRadialShare: 0.4,
   wallJitter: 0.09,
